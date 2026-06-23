@@ -107,20 +107,59 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        Directory.CreateDirectory(Settings.OutputDirectory);
-        var filePath = Path.Combine(Settings.OutputDirectory, $"protokol_{SelectedForm.PrescriptionNumber}.pdf");
-        _protocolPdfGenerator.GenerateProtocolWithA4Label(SelectedForm, Settings.Pharmacy, filePath);
-        MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        try
+        {
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var prescriptionNumber = CreateSafeFileNamePart(SelectedForm.PrescriptionNumber);
+            var filePath = Path.Combine(Settings.OutputDirectory, $"protokol_{prescriptionNumber}.pdf");
+            _protocolPdfGenerator.GenerateProtocolWithA4Label(SelectedForm, Settings.Pharmacy, filePath);
+            MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
     }
 
     private void GenerateLabels(LabelType labelType)
     {
-        Directory.CreateDirectory(Settings.OutputDirectory);
-        var fileName = labelType == LabelType.Zewnetrznie ? "naklejki_zewnetrzne.pdf" : "naklejki_wewnetrzne.pdf";
-        var filePath = Path.Combine(Settings.OutputDirectory, fileName);
-        var forms = ImportedForms.Where(form => form.LabelType == labelType).ToList();
-        _labelPdfGenerator.GenerateBrotherLabels(forms, Settings.Pharmacy, filePath);
-        MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        try
+        {
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var fileName = labelType == LabelType.Zewnetrznie ? "naklejki_zewnetrzne.pdf" : "naklejki_wewnetrzne.pdf";
+            var filePath = Path.Combine(Settings.OutputDirectory, fileName);
+            var forms = ImportedForms.Where(form => form.LabelType == labelType).ToList();
+
+            if (forms.Count == 0)
+            {
+                MessageBox.Show("Brak formularzy dla wybranego typu etykiety.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _labelPdfGenerator.GenerateBrotherLabels(forms, Settings.Pharmacy, filePath);
+            MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+    }
+
+    private static string CreateSafeFileNamePart(string value)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var safeValue = new string(value.Select(character => invalidChars.Contains(character) ? '_' : character).ToArray()).Trim();
+
+        return string.IsNullOrWhiteSpace(safeValue) ? "bez_numeru" : safeValue;
+    }
+
+    private static void ShowPdfError(Exception exception)
+    {
+        MessageBox.Show(
+            $"Nie udalo sie wygenerowac PDF.\n\n{exception.Message}",
+            "PharmaExt",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

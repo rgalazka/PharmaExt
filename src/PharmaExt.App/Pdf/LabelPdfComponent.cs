@@ -31,7 +31,7 @@ public sealed class LabelPdfComponent : IComponent
             {
                 column.Item().BorderBottom(1).Height(13, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(18).CharacterSpacing(4);
+                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(18);
                     row.RelativeItem().AlignCenter().AlignMiddle().Text($"Nr recepty: {_form.PrescriptionNumber}").Bold().FontSize(14);
                 });
 
