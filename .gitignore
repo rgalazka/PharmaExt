@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.db
+*.sqlite
+*.sqlite3
+output/
+tmp_numbers_preview/

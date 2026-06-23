@@ -1,0 +1,187 @@
+<Window x:Class="PharmaExt.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PharmaExt" Height="760" Width="1180"
+        MinHeight="640" MinWidth="980">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="PharmaExt" FontSize="26" FontWeight="SemiBold" />
+                <TextBlock Text="Protokoly recepturowe i etykiety Brother QL" Foreground="#555" />
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem Header="Wyszukiwanie">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border BorderBrush="#D0D5DD" BorderThickness="1" Padding="12" CornerRadius="4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="120" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="Data od" />
+                                <DatePicker SelectedDate="{Binding SearchDateFrom}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                <TextBlock Text="Data do" />
+                                <DatePicker SelectedDate="{Binding SearchDateTo}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Margin="0,0,12,0">
+                                <TextBlock Text="Adres" />
+                                <TextBox Text="{Binding SearchAddress, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <Button Grid.Column="3" Content="Szukaj" Command="{Binding SearchCommand}" Height="32" VerticalAlignment="Bottom" />
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="1"
+                              Margin="0,12,0,0"
+                              ItemsSource="{Binding FoundPrescriptions}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              SelectionMode="Extended">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="130" />
+                            <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="220" />
+                            <DataGridTextColumn Header="Adres" Binding="{Binding PatientAddress}" Width="*" />
+                            <DataGridTextColumn Header="Data" Binding="{Binding PreparationDate, StringFormat=d}" Width="120" />
+                            <DataGridTextColumn Header="Lekarz" Binding="{Binding DoctorName}" Width="180" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Formularze">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="360" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <DataGrid ItemsSource="{Binding ImportedForms}"
+                              SelectedItem="{Binding SelectedForm}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="110" />
+                            <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="150" />
+                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <ScrollViewer Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel DataContext="{Binding SelectedForm}">
+                            <TextBlock Text="Edycja formularza" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+                            <UniformGrid Columns="2" Margin="0,0,0,12">
+                                <StackPanel Margin="0,0,12,8">
+                                    <TextBlock Text="Nr recepty" />
+                                    <TextBox Text="{Binding PrescriptionNumber}" IsReadOnly="True" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="Pacjent" />
+                                    <TextBox Text="{Binding PatientName}" IsReadOnly="True" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,8">
+                                    <TextBlock Text="Lekarz" />
+                                    <TextBox Text="{Binding DoctorName}" IsReadOnly="True" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="Osoba sporzadzajaca" />
+                                    <TextBox Text="{Binding PreparedByName}" IsReadOnly="True" />
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <TextBlock Text="Etykieta" FontWeight="SemiBold" Margin="0,6,0,6" />
+                            <UniformGrid Columns="2" Margin="0,0,0,12">
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="Typ" />
+                                    <ComboBox SelectedItem="{Binding LabelType}" ItemsSource="{Binding DataContext.LabelTypes, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Rozmiar" />
+                                    <ComboBox SelectedItem="{Binding LabelSize}" ItemsSource="{Binding DataContext.LabelSizes, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <TextBlock Text="Skladniki" FontWeight="SemiBold" Margin="0,6,0,6" />
+                            <DataGrid ItemsSource="{Binding Ingredients}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      Height="170">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Lp" Binding="{Binding Lp}" Width="40" />
+                                    <DataGridTextColumn Header="Nazwa" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Ilosc" Binding="{Binding PrescribedQuantity}" Width="90" />
+                                    <DataGridTextColumn Header="Jedn." Binding="{Binding Unit}" Width="70" />
+                                    <DataGridTextColumn Header="Seria" Binding="{Binding BatchNumber}" Width="110" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <TextBlock Text="Pola robocze" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <TextBlock Text="Obliczenia" />
+                            <TextBox Text="{Binding ManualCalculations}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
+                            <TextBlock Text="Opis wykonania" Margin="0,8,0,0" />
+                            <TextBox Text="{Binding ManualPreparationDescription}" AcceptsReturn="True" Height="90" TextWrapping="Wrap" />
+                            <TextBlock Text="Kontrola koncowa" Margin="0,8,0,0" />
+                            <TextBox Text="{Binding ManualQualityControl}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
+                            <TextBlock Text="Uwagi" Margin="0,8,0,0" />
+                            <TextBox Text="{Binding ManualNotes}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Ustawienia">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="420" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel>
+                        <TextBlock Text="Dane apteki" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <TextBlock Text="Nazwa apteki" />
+                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyName}" />
+                        <TextBlock Text="Adres apteki" Margin="0,8,0,0" />
+                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyAddress}" />
+
+                        <TextBlock Text="Firebird" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
+                        <TextBlock Text="Host" />
+                        <TextBox Text="{Binding Settings.Firebird.Host}" />
+                        <TextBlock Text="Sciezka bazy" Margin="0,8,0,0" />
+                        <TextBox Text="{Binding Settings.Firebird.DatabasePath}" />
+                        <TextBlock Text="Uzytkownik" Margin="0,8,0,0" />
+                        <TextBox Text="{Binding Settings.Firebird.User}" />
+
+                        <TextBlock Text="PDF" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
+                        <TextBlock Text="Katalog zapisu" />
+                        <TextBox Text="{Binding Settings.OutputDirectory}" />
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Zapisz" Command="{Binding SaveCommand}" Width="110" Margin="0,0,8,0" />
+            <Button Content="PDF protokolu" Command="{Binding GenerateProtocolPdfCommand}" Width="130" Margin="0,0,8,0" />
+            <Button Content="Etykiety zew." Command="{Binding GenerateExternalLabelsCommand}" Width="120" Margin="0,0,8,0" />
+            <Button Content="Etykiety wew." Command="{Binding GenerateInternalLabelsCommand}" Width="120" />
+        </StackPanel>
+    </Grid>
+</Window>
