@@ -42,8 +42,8 @@ public sealed class ProtocolPdfGenerator
         {
             column.Item().Border(1).Padding(4).Column(header =>
             {
-                header.Item().Text("PROTOKÓŁ SPORZĄDZENIA LEKU RECEPTUROWEGO").Bold().FontSize(12);
-                header.Item().Text("Zgodnie z monografią Leki sporządzane w aptece").FontSize(6);
+                header.Item().Text($"PROTOKÓŁ SPORZĄDZENIA LEKU RECEPTUROWEGO NR: {form.PrescriptionNumber} Z DNIA {form.PreparationDate:dd.MM.yyyy}").Bold().FontSize(12);
+                header.Item().Text("Zgodnie z monografią Leki sporządzane w aptece wg. Farmakopei Polskiej XIII").FontSize(6);
             });
 
             Section(column, "1. IDENTYFIKACJA", section =>
@@ -57,13 +57,15 @@ public sealed class ProtocolPdfGenerator
                     });
 
                     Cell(table, "Apteka", $"{pharmacy.PharmacyName}, {pharmacy.PharmacyAddress}");
-                    Cell(table, "Nr recepty", form.PrescriptionNumber);
-                    Cell(table, "Pacjent / oznaczenie recepty", form.PatientName);
+                    Cell(table, "Nr. leku / recepty", BuildMedicinePrescriptionNumber(form));
+                    Cell(table, "Pacjent", form.PatientName);
+                    Cell(table, "Adres pacjenta", form.PatientAddress);
                     Cell(table, "Data sporządzenia", form.PreparationDate.ToString("dd.MM.yyyy"));
                     Cell(table, "Postać leku", form.DrugForm);
                     Cell(table, "Termin ważności leku", form.ExpiryTermText);
                     Cell(table, "Osoba sporządzająca", form.PreparedByName);
                     Cell(table, "Lekarz", form.DoctorName);
+                    BarcodeCell(table, "Klucz recepty", form.PrescriptionBarcode);
                 });
             });
 
@@ -161,6 +163,29 @@ public sealed class ProtocolPdfGenerator
             text.Span(label + ": ").Bold();
             text.Span(value);
         });
+    }
+
+    private static void BarcodeCell(TableDescriptor table, string label, string value)
+    {
+        table.Cell().ColumnSpan(2).Border(0.5f).Padding(2).Column(column =>
+        {
+            column.Item().Text(label + ":").Bold().FontSize(6);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                column.Item().Text("brak").FontSize(6);
+                return;
+            }
+
+            column.Item().Width(122, Unit.Millimetre).Height(6.4f, Unit.Millimetre).Svg(Code128Barcode.CreateSvg(value, 28));
+            column.Item().Width(122, Unit.Millimetre).AlignCenter().Text(value).FontSize(5);
+        });
+    }
+
+    private static string BuildMedicinePrescriptionNumber(ImportedForm form)
+    {
+        return string.IsNullOrWhiteSpace(form.PrescriptionOrderNumber)
+            ? form.PrescriptionNumber
+            : $"{form.PrescriptionNumber}/{form.PrescriptionOrderNumber}";
     }
 
     private static void HeaderCell(TableDescriptor table, string value)

@@ -26,6 +26,7 @@ public sealed class LocalDatabaseService
                 OutputDirectory TEXT NOT NULL,
                 DefaultLabelType TEXT NOT NULL,
                 DefaultLabelSize TEXT NOT NULL,
+                MaxUsedQuantityDeviationPercent REAL NOT NULL DEFAULT 0.6,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
@@ -42,6 +43,8 @@ public sealed class LocalDatabaseService
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 SourcePrescriptionId TEXT NOT NULL UNIQUE,
                 PrescriptionNumber TEXT NOT NULL,
+                PrescriptionOrderNumber TEXT NOT NULL DEFAULT '',
+                PrescriptionBarcode TEXT NOT NULL DEFAULT '',
                 PatientName TEXT NOT NULL,
                 PatientAddress TEXT NOT NULL,
                 DoctorName TEXT NOT NULL,
@@ -58,6 +61,7 @@ public sealed class LocalDatabaseService
                 ManualQualityControl TEXT NOT NULL,
                 ManualFinalAssessment TEXT NOT NULL,
                 ManualNotes TEXT NOT NULL,
+                MixBeforeUse INTEGER NOT NULL DEFAULT 0,
                 Status TEXT NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
@@ -87,6 +91,10 @@ public sealed class LocalDatabaseService
             );
             """;
         command.ExecuteNonQuery();
+        AddColumnIfMissing(connection, "AppSettings", "MaxUsedQuantityDeviationPercent", "REAL NOT NULL DEFAULT 0.6");
+        AddColumnIfMissing(connection, "ImportedForms", "PrescriptionOrderNumber", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "ImportedForms", "PrescriptionBarcode", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "ImportedForms", "MixBeforeUse", "INTEGER NOT NULL DEFAULT 0");
     }
 
     public void SaveSettings(AppSettings settings)
@@ -97,9 +105,9 @@ public sealed class LocalDatabaseService
         Execute(connection, transaction, """
             INSERT INTO AppSettings (
                 Id, FirebirdHost, FirebirdDatabasePath, FirebirdUser, FirebirdPasswordEncrypted,
-                OutputDirectory, DefaultLabelType, DefaultLabelSize, CreatedAt, UpdatedAt
+                OutputDirectory, DefaultLabelType, DefaultLabelSize, MaxUsedQuantityDeviationPercent, CreatedAt, UpdatedAt
             )
-            VALUES (1, $host, $databasePath, $user, $password, $output, $labelType, $labelSize, $now, $now)
+            VALUES (1, $host, $databasePath, $user, $password, $output, $labelType, $labelSize, $maxDeviationPercent, $now, $now)
             ON CONFLICT(Id) DO UPDATE SET
                 FirebirdHost = excluded.FirebirdHost,
                 FirebirdDatabasePath = excluded.FirebirdDatabasePath,
@@ -108,6 +116,7 @@ public sealed class LocalDatabaseService
                 OutputDirectory = excluded.OutputDirectory,
                 DefaultLabelType = excluded.DefaultLabelType,
                 DefaultLabelSize = excluded.DefaultLabelSize,
+                MaxUsedQuantityDeviationPercent = excluded.MaxUsedQuantityDeviationPercent,
                 UpdatedAt = excluded.UpdatedAt;
             """,
             ("$host", settings.Firebird.Host),
@@ -117,6 +126,7 @@ public sealed class LocalDatabaseService
             ("$output", settings.OutputDirectory),
             ("$labelType", settings.DefaultLabelType.ToString()),
             ("$labelSize", settings.DefaultLabelSize.ToString()),
+            ("$maxDeviationPercent", settings.MaxUsedQuantityDeviationPercent),
             ("$now", DateTime.Now.ToString("O")));
 
         Execute(connection, transaction, """
@@ -142,19 +152,21 @@ public sealed class LocalDatabaseService
 
         Execute(connection, transaction, """
             INSERT INTO ImportedForms (
-                SourcePrescriptionId, PrescriptionNumber, PatientName, PatientAddress, DoctorName,
+                SourcePrescriptionId, PrescriptionNumber, PrescriptionOrderNumber, PrescriptionBarcode, PatientName, PatientAddress, DoctorName,
                 PreparedByName, PreparationDate, DrugForm, ExpiryTermText, Dosage, StorageConditions,
                 LabelType, LabelSize, ManualCalculations, ManualPreparationDescription,
-                ManualQualityControl, ManualFinalAssessment, ManualNotes, Status, CreatedAt, UpdatedAt
+                ManualQualityControl, ManualFinalAssessment, ManualNotes, MixBeforeUse, Status, CreatedAt, UpdatedAt
             )
             VALUES (
-                $sourcePrescriptionId, $prescriptionNumber, $patientName, $patientAddress, $doctorName,
+                $sourcePrescriptionId, $prescriptionNumber, $prescriptionOrderNumber, $prescriptionBarcode, $patientName, $patientAddress, $doctorName,
                 $preparedByName, $preparationDate, $drugForm, $expiryTermText, $dosage, $storageConditions,
                 $labelType, $labelSize, $manualCalculations, $manualPreparationDescription,
-                $manualQualityControl, $manualFinalAssessment, $manualNotes, $status, $now, $now
+                $manualQualityControl, $manualFinalAssessment, $manualNotes, $mixBeforeUse, $status, $now, $now
             )
             ON CONFLICT(SourcePrescriptionId) DO UPDATE SET
                 PrescriptionNumber = excluded.PrescriptionNumber,
+                PrescriptionOrderNumber = excluded.PrescriptionOrderNumber,
+                PrescriptionBarcode = excluded.PrescriptionBarcode,
                 PatientName = excluded.PatientName,
                 PatientAddress = excluded.PatientAddress,
                 DoctorName = excluded.DoctorName,
@@ -171,11 +183,14 @@ public sealed class LocalDatabaseService
                 ManualQualityControl = excluded.ManualQualityControl,
                 ManualFinalAssessment = excluded.ManualFinalAssessment,
                 ManualNotes = excluded.ManualNotes,
+                MixBeforeUse = excluded.MixBeforeUse,
                 Status = excluded.Status,
                 UpdatedAt = excluded.UpdatedAt;
             """,
             ("$sourcePrescriptionId", form.SourcePrescriptionId),
             ("$prescriptionNumber", form.PrescriptionNumber),
+            ("$prescriptionOrderNumber", form.PrescriptionOrderNumber),
+            ("$prescriptionBarcode", form.PrescriptionBarcode),
             ("$patientName", form.PatientName),
             ("$patientAddress", form.PatientAddress),
             ("$doctorName", form.DoctorName),
@@ -192,6 +207,7 @@ public sealed class LocalDatabaseService
             ("$manualQualityControl", form.ManualQualityControl),
             ("$manualFinalAssessment", form.ManualFinalAssessment),
             ("$manualNotes", form.ManualNotes),
+            ("$mixBeforeUse", form.MixBeforeUse ? 1 : 0),
             ("$status", form.Status.ToString()),
             ("$now", now));
 
@@ -246,6 +262,24 @@ public sealed class LocalDatabaseService
             command.Parameters.AddWithValue(parameter.Name, parameter.Value ?? DBNull.Value);
         }
 
+        command.ExecuteNonQuery();
+    }
+
+    private static void AddColumnIfMissing(SqliteConnection connection, string tableName, string columnName, string definition)
+    {
+        using var schemaCommand = connection.CreateCommand();
+        schemaCommand.CommandText = $"PRAGMA table_info({tableName});";
+        using var reader = schemaCommand.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(Convert.ToString(reader["name"]), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
         command.ExecuteNonQuery();
     }
 }

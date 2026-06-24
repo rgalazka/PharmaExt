@@ -33,7 +33,7 @@ public sealed class MockFirebirdPrescriptionReader : IFirebirdPrescriptionReader
             PreparedByName = "Katarzyna Gałązka",
             PreparationDate = DateTime.Today,
             DrugForm = "Płyn",
-            ExpiryTermText = "14 dni",
+            ExpiryTermText = DateTime.Today.AddDays(14).ToString("dd.MM.yyyy"),
             Dosage = labelType == LabelType.Zewnetrznie ? "2 x dziennie do płukania" : "według zaleceń lekarza",
             StorageConditions = "W suchym i chłodnym miejscu, temp. 2-8 st. C",
             LabelType = labelType,

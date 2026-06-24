@@ -10,6 +10,8 @@ public sealed class ImportedForm
     public string FirebirdDoctorId { get; set; } = "";
     public string SourcePrescriptionId { get; set; } = "";
     public string PrescriptionNumber { get; set; } = "";
+    public string PrescriptionOrderNumber { get; set; } = "";
+    public string PrescriptionBarcode { get; set; } = "";
     public string PatientName { get; set; } = "";
     public string PatientAddress { get; set; } = "";
     public string DoctorName { get; set; } = "";
@@ -26,6 +28,7 @@ public sealed class ImportedForm
     public string ManualQualityControl { get; set; } = "";
     public string ManualFinalAssessment { get; set; } = "";
     public string ManualNotes { get; set; } = "";
+    public bool MixBeforeUse { get; set; }
     public FormStatus Status { get; set; } = FormStatus.Imported;
     public bool IngredientsLoaded { get; set; }
     public ObservableCollection<ImportedFormIngredient> Ingredients { get; set; } = new();

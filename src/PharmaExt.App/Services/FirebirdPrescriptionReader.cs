@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
 using FirebirdSql.Data.FirebirdClient;
 using PharmaExt.App.Models;
 
@@ -24,10 +25,12 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
             SELECT
                 SPRZ.KODR1,
                 SPRZ.NRSRC,
+                SPRZ.NRORC,
+                SPRZ.EKLCZ,
                 SPRZ.DATSP,
                 SPRZ.GDZSP,
                 SPRZ.KDPLR,
-                SPRZ.ID_SPR,
+                SPRZ.ID_WYC,
                 SPRZ.IDPACA,
                 SPRZ.IDLEKA,
                 PERS.NAZWU AS SPORZADZAJACY_NAZWA,
@@ -36,24 +39,28 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                 PACA.MIAST,
                 PACA.ULICA,
                 PACA.NRDOM,
-                LEKA.NAZWU AS LEKARZ_NAZWA
+                LEKA.NAZWU AS LEKARZ_NAZWA,
+                MAX(AKSP.DATWZ2) AS TERMIN_WAZNOSCI_LEKU
             FROM SPRZ
             LEFT JOIN PACA ON SPRZ.IDPACA = PACA.ID
             LEFT JOIN LEKA ON SPRZ.IDLEKA = LEKA.ID
-            LEFT JOIN PERS ON SPRZ.ID_SPR = PERS.ID
+            LEFT JOIN PERS ON TRIM(SPRZ.ID_WYC) = TRIM(CAST(PERS.ID AS VARCHAR(30)))
+            LEFT JOIN AKSP ON AKSP.IDSPRZ = SPRZ.ID
             WHERE SPRZ.DATSP >= @DateFrom
               AND SPRZ.DATSP < @DateTo
-              AND SPRZ.TYPSP = 80
-              AND SPRZ.ODPLT = 5
-              AND SPRZ.WSKOR = 0
-              AND SPRZ.WSKUS = 0
+              AND SPRZ.TYPSP = '80'
+              AND SPRZ.ODPLT = '5'
+              AND SPRZ.WSKOR = '0'
+              AND SPRZ.WSKUS = '0'
             GROUP BY
                 SPRZ.KODR1,
                 SPRZ.NRSRC,
+                SPRZ.NRORC,
+                SPRZ.EKLCZ,
                 SPRZ.DATSP,
                 SPRZ.GDZSP,
                 SPRZ.KDPLR,
-                SPRZ.ID_SPR,
+                SPRZ.ID_WYC,
                 SPRZ.IDPACA,
                 SPRZ.IDLEKA,
                 PERS.NAZWU,
@@ -91,9 +98,11 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                 FirebirdPatientId = ReadString(reader, "IDPACA"),
                 FirebirdDoctorId = ReadString(reader, "IDLEKA"),
                 PrescriptionNumber = ReadString(reader, "NRSRC"),
+                PrescriptionOrderNumber = ReadString(reader, "NRORC"),
+                PrescriptionBarcode = ReadString(reader, "EKLCZ"),
                 PreparationDate = preparationDate,
-                DrugForm = ReadString(reader, "KDPLR"),
-                ExpiryTermText = "14 dni",
+                DrugForm = MapDrugForm(ReadString(reader, "KDPLR")),
+                ExpiryTermText = FormatMedicineExpiryDate(ReadNullableDateTime(reader, "TERMIN_WAZNOSCI_LEKU"), preparationDate),
                 Dosage = "",
                 StorageConditions = "W suchym i chłodnym miejscu, temp. 2-8 st. C",
                 ManualCalculations = "Zgodnie z instrukcją numer: ____________________",
@@ -106,7 +115,7 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                     ReadString(reader, "ULICA"),
                     ReadString(reader, "NRDOM")),
                 DoctorName = ReadString(reader, "LEKARZ_NAZWA"),
-                PreparedByName = ReadString(reader, "SPORZADZAJACY_NAZWA", ReadString(reader, "ID_SPR"))
+                PreparedByName = ReadString(reader, "SPORZADZAJACY_NAZWA", ReadString(reader, "ID_WYC"))
             };
 
             if (MatchesSearchText(form, searchText) && seenPrescriptionKeys.Add(BuildPrescriptionKey(form)))
@@ -149,7 +158,7 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         return new FbConnection(builder.ConnectionString);
     }
 
-    private static void LoadIngredients(FbConnection connection, ImportedForm form)
+    private void LoadIngredients(FbConnection connection, ImportedForm form)
     {
         form.Ingredients.Clear();
 
@@ -167,10 +176,10 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
             LEFT JOIN KZAK ON SPRZ.IDKZAK = KZAK.ID
             LEFT JOIN LEKI ON SPRZ.IDTOWR = LEKI.IDTOWR
             WHERE SPRZ.KODR1 = @SourcePrescriptionId
-              AND SPRZ.TYPSP = 50
-              AND SPRZ.POZRC > 0
-              AND SPRZ.WSKOR = 0
-              AND SPRZ.WSKUS = 0
+              AND SPRZ.TYPSP = '50'
+              AND SPRZ.POZRC <> '0'
+              AND SPRZ.WSKOR = '0'
+              AND SPRZ.WSKUS = '0'
             ORDER BY SPRZ.POZRC
             """;
         command.Parameters.AddWithValue("@SourcePrescriptionId", form.SourcePrescriptionId);
@@ -231,12 +240,36 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         return value.IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0;
     }
 
+    private static string MapDrugForm(string code)
+    {
+        return code.Trim() switch
+        {
+            "1" => "dla proszków dzielonych - do 20 sztuk",
+            "2" => "dla proszków niedzielonych (prostych i złożonych - do 80 gramów)",
+            "3" => "dla czopków, globulek oraz pręcików - do 12 sztuk",
+            "4" => "dla roztworów, mikstur, zawiesin oraz emulsji do użytku wewnętrznego - do 250 gramów",
+            "5" => "dla płynnych leków do stosowania zewnętrznego - do 500 gramów",
+            "6" => "dla maści, kremów, mazideł, past oraz żeli - do 100 gramów",
+            "7" => "dla kropli do użytku wewnętrznego i zewnętrznego - do 40 gramów",
+            "8" => "dla mieszanek ziołowych - do 100 gramów",
+            "9" => "dla pigułek - do 30 sztuk",
+            "10" => "dla klein - do 500 gramów",
+            "11" => "dla kropli do oczu, uszu i nosa w warunkach aseptycznych - do 10 gramów",
+            _ => code
+        };
+    }
+
+    private static string FormatMedicineExpiryDate(DateTime? expiryDate, DateTime preparationDate)
+    {
+        return (expiryDate?.Date ?? preparationDate.Date.AddDays(14)).ToString("dd.MM.yyyy");
+    }
+
     private static string BuildIngredientKey(ImportedFormIngredient ingredient)
     {
         return $"{ingredient.Lp}|{ingredient.Name}|{ingredient.PrescribedQuantity}|{ingredient.Unit}|{ingredient.BatchNumber}";
     }
 
-    private static decimal GenerateUsedQuantity(ImportedForm form, ImportedFormIngredient ingredient)
+    private decimal GenerateUsedQuantity(ImportedForm form, ImportedFormIngredient ingredient)
     {
         if (ingredient.PrescribedQuantity <= 0)
         {
@@ -251,9 +284,12 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         var seed = $"{form.SourcePrescriptionId}|{ingredient.Lp}|{ingredient.Name}|{ingredient.PrescribedQuantity}|{ingredient.Unit}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
         var fraction = BitConverter.ToUInt32(hash, 0) / (decimal)uint.MaxValue;
-        var reductionPercent = 0.01m + fraction * 0.01m;
+        var maxDeviationPercent = Math.Clamp(_settings.MaxUsedQuantityDeviationPercent, 0m, 100m) / 100m;
+        var biasedFraction = fraction * fraction;
+        var reductionPercent = biasedFraction * maxDeviationPercent;
 
-        return decimal.Round(ingredient.PrescribedQuantity * (1 - reductionPercent), 3, MidpointRounding.AwayFromZero);
+        var usedQuantity = decimal.Round(ingredient.PrescribedQuantity * (1 - reductionPercent), 3, MidpointRounding.AwayFromZero);
+        return Math.Min(usedQuantity, ingredient.PrescribedQuantity);
     }
 
     private static string ReadString(FbDataReader reader, string name)
@@ -283,12 +319,70 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
     private static int ReadInt32(FbDataReader reader, string name)
     {
         var ordinal = reader.GetOrdinal(name);
-        return reader.IsDBNull(ordinal) ? 0 : Convert.ToInt32(reader.GetValue(ordinal));
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        var value = reader.GetValue(ordinal);
+        if (value is int intValue)
+        {
+            return intValue;
+        }
+
+        if (value is short shortValue)
+        {
+            return shortValue;
+        }
+
+        if (value is long longValue)
+        {
+            return longValue > int.MaxValue || longValue < int.MinValue ? 0 : (int)longValue;
+        }
+
+        if (int.TryParse(Convert.ToString(value), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedValue))
+        {
+            return parsedValue;
+        }
+
+        return 0;
     }
 
     private static decimal ReadDecimal(FbDataReader reader, string name)
     {
         var ordinal = reader.GetOrdinal(name);
-        return reader.IsDBNull(ordinal) ? 0 : Convert.ToDecimal(reader.GetValue(ordinal));
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        var value = reader.GetValue(ordinal);
+        if (value is decimal decimalValue)
+        {
+            return decimalValue;
+        }
+
+        if (value is double doubleValue)
+        {
+            return Convert.ToDecimal(doubleValue);
+        }
+
+        if (value is float floatValue)
+        {
+            return Convert.ToDecimal(floatValue);
+        }
+
+        var text = Convert.ToString(value)?.Trim();
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var currentCultureValue))
+        {
+            return currentCultureValue;
+        }
+
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var invariantCultureValue))
+        {
+            return invariantCultureValue;
+        }
+
+        return 0;
     }
 }

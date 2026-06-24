@@ -17,6 +17,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly ProtocolPdfGenerator _protocolPdfGenerator;
     private readonly BrotherLabelPdfGenerator _labelPdfGenerator;
     private ImportedForm? _selectedForm;
+    private bool _isSearching;
 
     public MainViewModel()
     {
@@ -29,7 +30,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         SearchDateFrom = DateTime.Today.AddDays(-7);
         SearchDateTo = DateTime.Today;
 
-        SearchCommand = new RelayCommand(Search);
+        SearchCommand = new RelayCommand(Search, () => !IsSearching);
         SaveCommand = new RelayCommand(Save);
         TestFirebirdConnectionCommand = new RelayCommand(TestFirebirdConnection);
         GenerateProtocolPdfCommand = new RelayCommand(GenerateProtocolPdf, () => SelectedForm is not null);
@@ -51,6 +52,22 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public LabelSize[] LabelSizes { get; } = Enum.GetValues<LabelSize>();
     public string[] FirebirdCharsets { get; } = ["DOMYSLNE", "NONE", "ISO8859_2", "WIN1250", "UTF8"];
 
+    public bool IsSearching
+    {
+        get => _isSearching;
+        private set
+        {
+            if (_isSearching == value)
+            {
+                return;
+            }
+
+            _isSearching = value;
+            OnPropertyChanged();
+            (SearchCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
+
     public ImportedForm? SelectedForm
     {
         get => _selectedForm;
@@ -70,15 +87,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand GenerateExternalLabelsCommand { get; }
     public ICommand GenerateInternalLabelsCommand { get; }
 
-    private void Search()
+    private async void Search()
     {
         try
         {
+            IsSearching = true;
             FoundPrescriptions.Clear();
             var reader = string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath)
                 ? _prescriptionReader
                 : new FirebirdPrescriptionReader(Settings);
-            var results = reader.Search(SearchDateFrom, SearchDateTo, SearchAddress);
+            var searchDateFrom = SearchDateFrom;
+            var searchDateTo = SearchDateTo;
+            var searchAddress = SearchAddress;
+            var results = await Task.Run(() => reader.Search(searchDateFrom, searchDateTo, searchAddress));
 
             var displayNumber = 1;
             foreach (var form in results)
@@ -97,6 +118,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+        finally
+        {
+            IsSearching = false;
+        }
     }
 
     private void ImportFoundPrescriptions()
@@ -107,7 +132,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ImportedForms.Add(form);
         }
 
-        SelectedForm = ImportedForms.FirstOrDefault();
+        SelectedForm = null;
     }
 
     private void LoadSelectedFormIngredients()

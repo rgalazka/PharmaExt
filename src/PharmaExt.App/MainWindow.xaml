@@ -3,6 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="PharmaExt" Height="760" Width="1180"
         MinHeight="640" MinWidth="980">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
+
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -23,6 +27,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <Border BorderBrush="#D0D5DD" BorderThickness="1" Padding="12" CornerRadius="4">
@@ -64,6 +69,14 @@
                             <DataGridTextColumn Header="Lekarz" Binding="{Binding DoctorName}" Width="180" />
                         </DataGrid.Columns>
                     </DataGrid>
+
+                    <ProgressBar Grid.Row="2"
+                                 Height="3"
+                                 Margin="0,6,0,0"
+                                 IsIndeterminate="True"
+                                 Foreground="#16A34A"
+                                 Background="#E5E7EB"
+                                 Visibility="{Binding IsSearching, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
             </TabItem>
 
@@ -119,6 +132,11 @@
                                     <TextBlock Text="Rozmiar" />
                                     <ComboBox SelectedItem="{Binding LabelSize}" ItemsSource="{Binding DataContext.LabelSizes, RelativeSource={RelativeSource AncestorType=Window}}" />
                                 </StackPanel>
+                                <StackPanel Margin="0,8,0,0" VerticalAlignment="Bottom">
+                                    <CheckBox Content="ZMIESZAĆ PRZED UŻYCIEM"
+                                              IsChecked="{Binding MixBeforeUse}"
+                                              FontWeight="SemiBold" />
+                                </StackPanel>
                             </UniformGrid>
 
                             <TextBlock Text="Skladniki" FontWeight="SemiBold" Margin="0,6,0,6" />
@@ -146,6 +164,8 @@
                             <TextBox Text="{Binding ManualPreparationDescription}" AcceptsReturn="True" Height="90" TextWrapping="Wrap" />
                             <TextBlock Text="Kontrola koncowa" Margin="0,8,0,0" />
                             <TextBox Text="{Binding ManualQualityControl}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
+                            <TextBlock Text="Dawkowanie" Margin="0,8,0,0" />
+                            <TextBox Text="{Binding Dosage}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
                             <TextBlock Text="Uwagi" Margin="0,8,0,0" />
                             <TextBox Text="{Binding ManualNotes}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
                         </StackPanel>
@@ -189,6 +209,8 @@
                         <TextBlock Text="PDF" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
                         <TextBlock Text="Katalog zapisu" />
                         <TextBox Text="{Binding Settings.OutputDirectory}" />
+                        <TextBlock Text="Maks. odchył ilości użytej (%)" Margin="0,8,0,0" />
+                        <TextBox Text="{Binding Settings.MaxUsedQuantityDeviationPercent, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                 </Grid>
             </TabItem>

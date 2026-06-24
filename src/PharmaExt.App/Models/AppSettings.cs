@@ -7,6 +7,7 @@ public sealed class AppSettings
     public string OutputDirectory { get; set; } = "output";
     public LabelType DefaultLabelType { get; set; } = LabelType.Zewnetrznie;
     public LabelSize DefaultLabelSize { get; set; } = LabelSize.Duza;
+    public decimal MaxUsedQuantityDeviationPercent { get; set; } = 0.6m;
 }
 
 public sealed class PharmacySettings
