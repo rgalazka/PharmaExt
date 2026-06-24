@@ -12,17 +12,18 @@ public sealed class BrotherLabelPdfGenerator
         {
             foreach (var form in forms)
             {
-                var pageHeight = form.LabelSize == LabelSize.Duza ? 120 : 100;
-                var tableWidth = form.LabelSize == LabelSize.Duza ? 55 : 40;
+                var pageWidth = form.LabelSize == LabelSize.Duza ? 180 : 160;
+                var pageHeight = form.LabelSize == LabelSize.Duza ? 88 : 76;
+                var tableHeight = form.LabelSize == LabelSize.Duza ? 82 : 70;
 
                 document.Page(page =>
                 {
-                    page.Size(62, pageHeight, Unit.Millimetre);
+                    page.Size(pageWidth, pageHeight, Unit.Millimetre);
                     page.Margin(0);
                     page.Content()
                         .AlignCenter()
                         .AlignMiddle()
-                        .Component(new LabelPdfComponent(form, pharmacy, tableWidth, pageHeight));
+                        .Component(new LabelPdfComponent(form, pharmacy, pageWidth, tableHeight));
                 });
             }
         }).GeneratePdf(filePath);

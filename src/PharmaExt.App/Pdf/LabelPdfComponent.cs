@@ -22,49 +22,78 @@ public sealed class LabelPdfComponent : IComponent
 
     public void Compose(IContainer container)
     {
+        const float headerHeightMm = 8;
+        const float pharmacyHeightMm = 9;
+        const float notesHeightMm = 8;
+        var detailsHeightMm = _tableHeightMm - headerHeightMm - pharmacyHeightMm;
+        var prescriptionHeightMm = detailsHeightMm - notesHeightMm;
+        var rowScale = detailsHeightMm / 38f;
+        var doctorHeightMm = 6f * rowScale;
+        var preparedByHeightMm = 6.5f * rowScale;
+        var preparationDateHeightMm = 6f * rowScale;
+        var expiryHeightMm = 6f * rowScale;
+        var dosageHeightMm = 6f * rowScale;
+        var storageHeightMm = 7.5f * rowScale;
+
         container
             .Width(_tableWidthMm, Unit.Millimetre)
             .Height(_tableHeightMm, Unit.Millimetre)
             .Border(1.5f)
-            .DefaultTextStyle(text => text.FontFamily("Arial").FontSize(7))
+            .DefaultTextStyle(text => text.FontFamily("Arial").FontSize(6))
             .Column(column =>
             {
-                column.Item().BorderBottom(1).Height(13, Unit.Millimetre).Row(row =>
+                column.Item().BorderBottom(1).Height(headerHeightMm, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(18);
-                    row.RelativeItem().AlignCenter().AlignMiddle().Text($"Nr recepty: {_form.PrescriptionNumber}").Bold().FontSize(14);
+                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(13);
+                    row.RelativeItem().AlignCenter().AlignMiddle().Text($"Nr recepty: {_form.PrescriptionNumber}").Bold().FontSize(11);
                 });
 
-                column.Item().Height(18, Unit.Millimetre).Row(row =>
+                column.Item().Height(pharmacyHeightMm, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem().BorderRight(1).AlignCenter().AlignMiddle().Text($"{_pharmacy.PharmacyName}\n{_pharmacy.PharmacyAddress}").Bold().FontSize(11).AlignCenter();
+                    row.RelativeItem().BorderRight(1).AlignCenter().AlignMiddle().Text($"{_pharmacy.PharmacyName}\n{_pharmacy.PharmacyAddress}").Bold().FontSize(8).AlignCenter();
                     row.RelativeItem().PaddingLeft(2).Text(text =>
                     {
-                        text.Span("Imie i Nazwisko Pacjenta\n");
-                        text.Span(_form.PatientName).Bold().FontSize(10);
+                        text.Span("Imię i Nazwisko Pacjenta\n");
+                        text.Span(_form.PatientName).Bold().FontSize(7);
                     });
                 });
 
-                column.Item().Extend().Row(row =>
+                column.Item().Height(detailsHeightMm, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem().BorderRight(1).Column(left =>
+                    row.RelativeItem(0.95f).BorderRight(1).Column(left =>
                     {
-                        LabelRow(left, "Imie i Nazwisko Lekarza", _form.DoctorName, 13);
-                        LabelRow(left, "Imie i Nazwisko osoby sporzadzajacej lek", _form.PreparedByName, 14);
-                        LabelRow(left, "Data sporzadzenia", _form.PreparationDate.ToString("dd.MM.yyyy"), 13);
-                        LabelRow(left, "Termin waznosci", _form.ExpiryTermText, 12);
-                        LabelRow(left, "Dawkowanie", _form.Dosage, 14);
-                        LabelRow(left, "Warunki przechowywania", _form.StorageConditions, 0);
+                        LabelRow(left, "Imię i Nazwisko Lekarza", _form.DoctorName, doctorHeightMm);
+                        LabelRow(left, "Imię i Nazwisko osoby sporządzającej lek", _form.PreparedByName, preparedByHeightMm);
+                        LabelRow(left, "Data sporządzenia", _form.PreparationDate.ToString("dd.MM.yyyy"), preparationDateHeightMm);
+                        LabelRow(left, "Termin ważności", _form.ExpiryTermText, expiryHeightMm);
+                        LabelRow(left, "Dawkowanie", _form.Dosage, dosageHeightMm);
+                        LabelRow(left, "Warunki przechowywania", _form.StorageConditions, storageHeightMm);
                     });
 
-                    row.RelativeItem().Column(right =>
+                    row.RelativeItem(1.05f).Column(right =>
                     {
-                        right.Item().Padding(2).Text("Rp.").Bold().FontSize(14);
-                        right.Item().PaddingHorizontal(3).Extend().Text(BuildIngredientsText()).Italic().Bold().FontSize(8);
-                        right.Item().BorderTop(1).Height(15, Unit.Millimetre).Padding(2).Text(text =>
+                        right.Item().Height(prescriptionHeightMm, Unit.Millimetre).Column(prescription =>
                         {
-                            text.Span("Uwagi\n");
-                            text.Span(_form.ManualNotes).Bold().FontSize(9);
+                            prescription.Item().PaddingLeft(2).PaddingTop(1).Text("Rp.").Bold().FontSize(10);
+                            prescription.Item().PaddingLeft(4).PaddingRight(6).PaddingTop(5, Unit.Millimetre).Column(ingredients =>
+                            {
+                                foreach (var ingredient in _form.Ingredients)
+                                {
+                                    ingredients.Item().Row(ingredientRow =>
+                                    {
+                                        ingredientRow.RelativeItem().Text(ingredient.Name).Italic().Bold().FontSize(6);
+                                        ingredientRow.ConstantItem(22, Unit.Millimetre).AlignRight().Text(ingredient.PrescribedQuantity.ToString("0.##")).Italic().Bold().FontSize(6);
+                                    });
+                                }
+
+                                ingredients.Item().Text("M.f. sol").Italic().Bold().FontSize(6);
+                            });
+                        });
+
+                        right.Item().BorderTop(1).Height(notesHeightMm, Unit.Millimetre).Row(notes =>
+                        {
+                            notes.RelativeItem().PaddingLeft(2).Text("Uwagi").FontSize(6);
+                            notes.RelativeItem().AlignCenter().AlignMiddle().Text(_form.ManualNotes).Bold().FontSize(7);
                         });
                     });
                 });
@@ -73,19 +102,12 @@ public sealed class LabelPdfComponent : IComponent
 
     private static void LabelRow(ColumnDescriptor column, string label, string value, float heightMm)
     {
-        var item = heightMm > 0 ? column.Item().Height(heightMm, Unit.Millimetre) : column.Item().Extend();
-        item.BorderTop(1).Padding(2).Column(inner =>
+        column.Item().Height(heightMm, Unit.Millimetre).BorderTop(1).PaddingHorizontal(2).Column(inner =>
         {
-            inner.Item().Text(label).FontSize(7);
-            inner.Item().AlignCenter().Text(value).Bold().FontSize(10);
+            inner.Item().Text(label).FontSize(5);
+            inner.Item().AlignCenter().Text(value).Bold().FontSize(7);
         });
     }
 
-    private string BuildIngredientsText()
-    {
-        return string.Join("\n", _form.Ingredients.Select(ingredient =>
-            $"{ingredient.Name}    {ingredient.PrescribedQuantity:0.##} {ingredient.Unit}"));
-    }
-
-    private string LabelTypeText() => _form.LabelType == LabelType.Zewnetrznie ? "ZEWNETRZNIE" : "WEWNETRZNIE";
+    private string LabelTypeText() => _form.LabelType == LabelType.Zewnetrznie ? "Z E W N Ę T R Z N I E" : "W E W N Ę T R Z N I E";
 }

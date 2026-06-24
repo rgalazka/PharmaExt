@@ -31,13 +31,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         SearchCommand = new RelayCommand(Search);
         SaveCommand = new RelayCommand(Save);
+        TestFirebirdConnectionCommand = new RelayCommand(TestFirebirdConnection);
         GenerateProtocolPdfCommand = new RelayCommand(GenerateProtocolPdf, () => SelectedForm is not null);
         GenerateExternalLabelsCommand = new RelayCommand(() => GenerateLabels(LabelType.Zewnetrznie));
         GenerateInternalLabelsCommand = new RelayCommand(() => GenerateLabels(LabelType.Wewnetrznie));
 
         _localDatabase.Initialize();
-        Search();
-        ImportFoundPrescriptions();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -50,6 +49,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ImportedForm> ImportedForms { get; } = new();
     public LabelType[] LabelTypes { get; } = Enum.GetValues<LabelType>();
     public LabelSize[] LabelSizes { get; } = Enum.GetValues<LabelSize>();
+    public string[] FirebirdCharsets { get; } = ["DOMYSLNE", "NONE", "ISO8859_2", "WIN1250", "UTF8"];
 
     public ImportedForm? SelectedForm
     {
@@ -57,6 +57,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             _selectedForm = value;
+            LoadSelectedFormIngredients();
             OnPropertyChanged();
             (GenerateProtocolPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
@@ -64,17 +65,37 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public ICommand SearchCommand { get; }
     public ICommand SaveCommand { get; }
+    public ICommand TestFirebirdConnectionCommand { get; }
     public ICommand GenerateProtocolPdfCommand { get; }
     public ICommand GenerateExternalLabelsCommand { get; }
     public ICommand GenerateInternalLabelsCommand { get; }
 
     private void Search()
     {
-        FoundPrescriptions.Clear();
-        var results = _prescriptionReader.Search(SearchDateFrom, SearchDateTo, SearchAddress);
-        foreach (var form in results)
+        try
         {
-            FoundPrescriptions.Add(form);
+            FoundPrescriptions.Clear();
+            var reader = string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath)
+                ? _prescriptionReader
+                : new FirebirdPrescriptionReader(Settings);
+            var results = reader.Search(SearchDateFrom, SearchDateTo, SearchAddress);
+
+            var displayNumber = 1;
+            foreach (var form in results)
+            {
+                form.DisplayNumber = displayNumber++;
+                FoundPrescriptions.Add(form);
+            }
+
+            ImportFoundPrescriptions();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie pobrac recept z Firebird.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -89,6 +110,29 @@ public sealed class MainViewModel : INotifyPropertyChanged
         SelectedForm = ImportedForms.FirstOrDefault();
     }
 
+    private void LoadSelectedFormIngredients()
+    {
+        if (_selectedForm is null || _selectedForm.IngredientsLoaded || string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var reader = new FirebirdPrescriptionReader(Settings);
+            reader.LoadIngredients(_selectedForm);
+            _selectedForm.IngredientsLoaded = true;
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie pobrac skladnikow recepty.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
     private void Save()
     {
         _localDatabase.SaveSettings(Settings);
@@ -98,6 +142,29 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         MessageBox.Show("Zapisano dane lokalnie.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void TestFirebirdConnection()
+    {
+        try
+        {
+            var reader = new FirebirdPrescriptionReader(Settings);
+            reader.TestConnection();
+
+            MessageBox.Show(
+                $"Polaczenie z baza Firebird dziala.\n\nKodowanie: {Settings.Firebird.Charset}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie polaczyc z baza Firebird.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     private void GenerateProtocolPdf()

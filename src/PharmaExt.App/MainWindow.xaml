@@ -42,7 +42,7 @@
                                 <DatePicker SelectedDate="{Binding SearchDateTo}" />
                             </StackPanel>
                             <StackPanel Grid.Column="2" Margin="0,0,12,0">
-                                <TextBlock Text="Adres" />
+                                <TextBlock Text="Pacjent / adres" />
                                 <TextBox Text="{Binding SearchAddress, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <Button Grid.Column="3" Content="Szukaj" Command="{Binding SearchCommand}" Height="32" VerticalAlignment="Bottom" />
@@ -56,10 +56,11 @@
                               IsReadOnly="True"
                               SelectionMode="Extended">
                         <DataGrid.Columns>
+                            <DataGridTextColumn Header="Lp." Binding="{Binding DisplayNumber}" Width="50" />
                             <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="130" />
                             <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="220" />
                             <DataGridTextColumn Header="Adres" Binding="{Binding PatientAddress}" Width="*" />
-                            <DataGridTextColumn Header="Data" Binding="{Binding PreparationDate, StringFormat=d}" Width="120" />
+                            <DataGridTextColumn Header="Data" Binding="{Binding PreparationDate, StringFormat={}{0:dd/MM/yyyy}}" Width="120" />
                             <DataGridTextColumn Header="Lekarz" Binding="{Binding DoctorName}" Width="180" />
                         </DataGrid.Columns>
                     </DataGrid>
@@ -69,7 +70,7 @@
             <TabItem Header="Formularze">
                 <Grid Margin="12">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="360" />
+                        <ColumnDefinition Width="470" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
@@ -78,8 +79,9 @@
                               AutoGenerateColumns="False"
                               IsReadOnly="True">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="110" />
-                            <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="150" />
+                            <DataGridTextColumn Header="Lp." Binding="{Binding DisplayNumber}" Width="45" />
+                            <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="100" />
+                            <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="210" />
                             <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90" />
                         </DataGrid.Columns>
                     </DataGrid>
@@ -122,14 +124,18 @@
                             <TextBlock Text="Skladniki" FontWeight="SemiBold" Margin="0,6,0,6" />
                             <DataGrid ItemsSource="{Binding Ingredients}"
                                       AutoGenerateColumns="False"
-                                      IsReadOnly="True"
-                                      Height="170">
+                                      IsReadOnly="False"
+                                      CanUserAddRows="False"
+                                      Height="190">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Lp" Binding="{Binding Lp}" Width="40" />
-                                    <DataGridTextColumn Header="Nazwa" Binding="{Binding Name}" Width="*" />
-                                    <DataGridTextColumn Header="Ilosc" Binding="{Binding PrescribedQuantity}" Width="90" />
-                                    <DataGridTextColumn Header="Jedn." Binding="{Binding Unit}" Width="70" />
-                                    <DataGridTextColumn Header="Seria" Binding="{Binding BatchNumber}" Width="110" />
+                                    <DataGridTextColumn Header="Lp" Binding="{Binding Lp}" Width="40" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Nazwa" Binding="{Binding Name}" Width="*" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Ilość" Binding="{Binding PrescribedQuantity}" Width="90" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Jedn." Binding="{Binding Unit}" Width="70" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Ilość użyta" Binding="{Binding UsedQuantity, UpdateSourceTrigger=PropertyChanged}" Width="95" />
+                                    <DataGridTextColumn Header="Seria" Binding="{Binding BatchNumber}" Width="110" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Ważność" Binding="{Binding ExpiryDate, StringFormat={}{0:dd/MM/yyyy}}" Width="100" IsReadOnly="True" />
+                                    <DataGridTextColumn Header="Producent" Binding="{Binding ManufacturerSupplier}" Width="130" IsReadOnly="True" />
                                 </DataGrid.Columns>
                             </DataGrid>
 
@@ -168,6 +174,17 @@
                         <TextBox Text="{Binding Settings.Firebird.DatabasePath}" />
                         <TextBlock Text="Uzytkownik" Margin="0,8,0,0" />
                         <TextBox Text="{Binding Settings.Firebird.User}" />
+                        <TextBlock Text="Haslo" Margin="0,8,0,0" />
+                        <PasswordBox Password="masterkey" PasswordChanged="FirebirdPasswordBox_PasswordChanged" />
+                        <TextBlock Text="Kodowanie" Margin="0,8,0,0" />
+                        <ComboBox SelectedItem="{Binding Settings.Firebird.Charset}"
+                                  ItemsSource="{Binding FirebirdCharsets}" />
+                        <Button Content="Test polaczenia"
+                                Command="{Binding TestFirebirdConnectionCommand}"
+                                Width="140"
+                                Height="32"
+                                HorizontalAlignment="Left"
+                                Margin="0,12,0,0" />
 
                         <TextBlock Text="PDF" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
                         <TextBlock Text="Katalog zapisu" />

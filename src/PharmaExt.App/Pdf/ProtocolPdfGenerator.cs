@@ -32,8 +32,8 @@ public sealed class ProtocolPdfGenerator
     private static LabelPdfComponent CreateA4LabelComponent(ImportedForm form, PharmacySettings pharmacy)
     {
         return form.LabelSize == LabelSize.Duza
-            ? new LabelPdfComponent(form, pharmacy, 55, 120)
-            : new LabelPdfComponent(form, pharmacy, 40, 100);
+            ? new LabelPdfComponent(form, pharmacy, 180, 82)
+            : new LabelPdfComponent(form, pharmacy, 160, 70);
     }
 
     private static void ComposeProtocol(IContainer container, ImportedForm form, PharmacySettings pharmacy)
@@ -42,8 +42,8 @@ public sealed class ProtocolPdfGenerator
         {
             column.Item().Border(1).Padding(4).Column(header =>
             {
-                header.Item().Text("PROTOKOL SPORZADZENIA LEKU RECEPTUROWEGO").Bold().FontSize(12);
-                header.Item().Text("Zgodnie z monografia Leki sporzadzane w aptece").FontSize(6);
+                header.Item().Text("PROTOKÓŁ SPORZĄDZENIA LEKU RECEPTUROWEGO").Bold().FontSize(12);
+                header.Item().Text("Zgodnie z monografią Leki sporządzane w aptece").FontSize(6);
             });
 
             Section(column, "1. IDENTYFIKACJA", section =>
@@ -59,70 +59,73 @@ public sealed class ProtocolPdfGenerator
                     Cell(table, "Apteka", $"{pharmacy.PharmacyName}, {pharmacy.PharmacyAddress}");
                     Cell(table, "Nr recepty", form.PrescriptionNumber);
                     Cell(table, "Pacjent / oznaczenie recepty", form.PatientName);
-                    Cell(table, "Data sporzadzenia", form.PreparationDate.ToString("dd.MM.yyyy"));
-                    Cell(table, "Postac leku", form.DrugForm);
-                    Cell(table, "Termin waznosci leku", form.ExpiryTermText);
-                    Cell(table, "Osoba sporzadzajaca", form.PreparedByName);
+                    Cell(table, "Data sporządzenia", form.PreparationDate.ToString("dd.MM.yyyy"));
+                    Cell(table, "Postać leku", form.DrugForm);
+                    Cell(table, "Termin ważności leku", form.ExpiryTermText);
+                    Cell(table, "Osoba sporządzająca", form.PreparedByName);
                     Cell(table, "Lekarz", form.DoctorName);
                 });
             });
 
-            Section(column, "2. SKLAD LEKU I UZYTE SUROWCE", section =>
+            Section(column, "2. SKŁAD LEKU I UŻYTE SUROWCE", section =>
             {
                 section.Table(table =>
                 {
                     table.ColumnsDefinition(columns =>
                     {
-                        columns.ConstantColumn(20);
-                        columns.RelativeColumn(2);
+                        columns.ConstantColumn(18);
+                        columns.RelativeColumn(2.1f);
+                        columns.RelativeColumn(0.8f);
+                        columns.ConstantColumn(28);
+                        columns.RelativeColumn(0.8f);
                         columns.RelativeColumn();
-                        columns.ConstantColumn(35);
                         columns.RelativeColumn();
-                        columns.RelativeColumn();
-                        columns.RelativeColumn();
+                        columns.RelativeColumn(1.2f);
                     });
 
                     HeaderCell(table, "Lp.");
-                    HeaderCell(table, "Skladnik");
-                    HeaderCell(table, "Ilosc przepisana");
+                    HeaderCell(table, "Składnik");
+                    HeaderCell(table, "Ilość przepisana");
                     HeaderCell(table, "Jedn.");
-                    HeaderCell(table, "Ilosc uzyta");
+                    HeaderCell(table, "Ilość użyta");
                     HeaderCell(table, "Nr serii");
-                    HeaderCell(table, "Termin waznosci");
+                    HeaderCell(table, "Termin ważności");
+                    HeaderCell(table, "Producent");
 
                     var rows = Math.Max(10, form.Ingredients.Count);
                     for (var index = 0; index < rows; index++)
                     {
                         var ingredient = form.Ingredients.ElementAtOrDefault(index);
-                        BodyCell(table, (index + 1).ToString());
+                        BodyCellCenter(table, (index + 1).ToString());
                         BodyCell(table, ingredient?.Name ?? "");
-                        BodyCell(table, ingredient is null ? "" : ingredient.PrescribedQuantity.ToString("0.##"));
-                        BodyCell(table, ingredient?.Unit ?? "");
-                        BodyCell(table, ingredient?.UsedQuantity?.ToString("0.##") ?? "");
+                        BodyCellRight(table, ingredient is null ? "" : ingredient.PrescribedQuantity.ToString("0.##"));
+                        BodyCellCenter(table, ingredient?.Unit ?? "");
+                        BodyCellRight(table, ingredient?.UsedQuantity?.ToString("0.###") ?? "");
                         BodyCell(table, ingredient?.BatchNumber ?? "");
                         BodyCell(table, ingredient?.ExpiryDate?.ToString("dd.MM.yyyy") ?? "");
+                        BodyCell(table, ingredient?.ManufacturerSupplier ?? "");
                     }
                 });
             });
 
             Section(column, "3. OBLICZENIA I SPRAWDZENIE DAWEK MAKSYMALNYCH", section =>
             {
-                section.Height(18, Unit.Millimetre).Padding(3).Text(form.ManualCalculations);
+                LoweredText(section.Height(18, Unit.Millimetre), DefaultIfEmpty(form.ManualCalculations, "Zgodnie z instrukcją numer: ____________________"));
             });
 
             Section(column, "4. OPIS WYKONANIA", section =>
             {
-                section.Height(22, Unit.Millimetre).Padding(3).Text(form.ManualPreparationDescription);
+                LoweredText(section.Height(22, Unit.Millimetre), DefaultIfEmpty(form.ManualPreparationDescription, "Zgodnie z instrukcją numer: ____________________"));
             });
 
-            Section(column, "5. WARUNKI PRZECHOWYWANIA I WYDAJNOSC", section =>
+            Section(column, "5. WARUNKI PRZECHOWYWANIA I WYDAJNOŚĆ", section =>
             {
-                section.Height(13, Unit.Millimetre).Padding(3).Text(form.StorageConditions);
+                LoweredText(section.Height(13, Unit.Millimetre), form.StorageConditions);
             });
 
-            Section(column, "6. KONTROLA KONCOWA", section =>
+            Section(column, "6. KONTROLA KOŃCOWA", section =>
             {
-                section.Height(26, Unit.Millimetre).Padding(3).Text(form.ManualQualityControl);
+                LoweredText(section.Height(26, Unit.Millimetre), DefaultIfEmpty(form.ManualQualityControl, "Nieprawidłowości nie stwierdzono"));
             });
 
             Section(column, "7. PODPISY", section =>
@@ -135,8 +138,8 @@ public sealed class ProtocolPdfGenerator
                         columns.RelativeColumn();
                     });
 
-                    BodyCell(table, $"Lek sporzadzil: {form.PreparedByName}\n\nPodpis:");
-                    BodyCell(table, "Sprawdzil / osoba odpowiedzialna:\n\nPodpis:");
+                    BodyCell(table, $"Lek sporządził: {form.PreparedByName}\n\nPodpis:");
+                    BodyCell(table, "Sprawdził / osoba odpowiedzialna:\n\nPodpis:");
                 });
             });
         });
@@ -168,5 +171,25 @@ public sealed class ProtocolPdfGenerator
     private static void BodyCell(TableDescriptor table, string value)
     {
         table.Cell().Border(0.5f).MinHeight(10).Padding(2).Text(value).FontSize(6);
+    }
+
+    private static void BodyCellRight(TableDescriptor table, string value)
+    {
+        table.Cell().Border(0.5f).MinHeight(10).Padding(2).AlignRight().Text(value).FontSize(6);
+    }
+
+    private static void BodyCellCenter(TableDescriptor table, string value)
+    {
+        table.Cell().Border(0.5f).MinHeight(10).Padding(2).AlignCenter().Text(value).FontSize(6);
+    }
+
+    private static void LoweredText(IContainer container, string value)
+    {
+        container.PaddingTop(3, Unit.Millimetre).PaddingLeft(3).PaddingRight(3).PaddingBottom(3).Text(value);
+    }
+
+    private static string DefaultIfEmpty(string value, string defaultValue)
+    {
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
     }
 }

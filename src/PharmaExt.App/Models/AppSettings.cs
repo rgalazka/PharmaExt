@@ -18,7 +18,8 @@ public sealed class PharmacySettings
 public sealed class FirebirdSettings
 {
     public string Host { get; set; } = "localhost";
-    public string DatabasePath { get; set; } = "";
+    public string DatabasePath { get; set; } = @"D:\BazaApteka\WAPTEKA.FDB";
     public string User { get; set; } = "SYSDBA";
-    public string Password { get; set; } = "";
+    public string Password { get; set; } = "masterkey";
+    public string Charset { get; set; } = "DOMYSLNE";
 }
