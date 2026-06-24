@@ -120,6 +120,18 @@
                                     <TextBlock Text="Osoba sporzadzajaca" />
                                     <TextBox Text="{Binding PreparedByName}" IsReadOnly="True" />
                                 </StackPanel>
+                                <StackPanel Margin="0,0,12,8">
+                                    <TextBlock Text="Data przyjecia" />
+                                    <TextBox Text="{Binding AcceptanceDate, StringFormat={}{0:dd/MM/yyyy}}" IsReadOnly="True" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="Data wykonania" />
+                                    <TextBox Text="{Binding PreparationDate, StringFormat={}{0:dd/MM/yyyy}}" IsReadOnly="True" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,8">
+                                    <TextBlock Text="Data sprzedazy" />
+                                    <TextBox Text="{Binding SaleDate, StringFormat={}{0:dd/MM/yyyy}}" IsReadOnly="True" />
+                                </StackPanel>
                             </UniformGrid>
 
                             <TextBlock Text="Etykieta" FontWeight="SemiBold" Margin="0,6,0,6" />
@@ -219,6 +231,7 @@
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="Zapisz" Command="{Binding SaveCommand}" Width="110" Margin="0,0,8,0" />
             <Button Content="PDF protokolu" Command="{Binding GenerateProtocolPdfCommand}" Width="130" Margin="0,0,8,0" />
+            <Button Content="PDF zbiorczy" Command="{Binding GenerateBatchPdfCommand}" Width="120" Margin="0,0,8,0" />
             <Button Content="Etykiety zew." Command="{Binding GenerateExternalLabelsCommand}" Width="120" Margin="0,0,8,0" />
             <Button Content="Etykiety wew." Command="{Binding GenerateInternalLabelsCommand}" Width="120" />
         </StackPanel>

@@ -27,12 +27,15 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                 SPRZ.NRSRC,
                 SPRZ.NRORC,
                 SPRZ.EKLCZ,
-                SPRZ.DATSP,
-                SPRZ.GDZSP,
                 SPRZ.KDPLR,
-                SPRZ.ID_WYC,
                 SPRZ.IDPACA,
                 SPRZ.IDLEKA,
+                SPRZ.WSKOR AS WSKOR_RECEPTY,
+                SPRZ.WSKUS AS WSKUS_RECEPTY,
+                COALESCE(
+                    CAST(AKSP_LATEST.IDWYC2 AS VARCHAR(30)),
+                    CAST(SPRZ.ID_WYC AS VARCHAR(30))
+                ) AS ID_WYKONAWCY,
                 PERS.NAZWU AS SPORZADZAJACY_NAZWA,
                 PACA.NAZWU AS PACJENT_NAZWA,
                 PACA.KDPCZ,
@@ -40,36 +43,29 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                 PACA.ULICA,
                 PACA.NRDOM,
                 LEKA.NAZWU AS LEKARZ_NAZWA,
-                MAX(AKSP.DATWZ2) AS TERMIN_WAZNOSCI_LEKU
+                COALESCE(AKSP_LATEST.DATWZ2, SPRZ.DATWZ) AS TERMIN_WAZNOSCI_LEKU,
+                COALESCE(AKSP_LATEST.DGWYC2, SPRZ.DGWYC) AS DATA_WYKONANIA,
+                COALESCE(AKSP_LATEST.DGPRZ2, SPRZ.DGPRZ) AS DATA_PRZYJECIA,
+                COALESCE(AKSP_LATEST.DATSP1, SPRZ.DATSP) AS DATA_SPRZEDAZY
             FROM SPRZ
+            LEFT JOIN AKSP AKSP_LATEST ON AKSP_LATEST.IDSPRZ = SPRZ.ID
+                AND AKSP_LATEST.DATAA = (
+                    SELECT MAX(AKSP_MAX.DATAA)
+                    FROM AKSP AKSP_MAX
+                    WHERE AKSP_MAX.IDSPRZ = SPRZ.ID
+                )
             LEFT JOIN PACA ON SPRZ.IDPACA = PACA.ID
             LEFT JOIN LEKA ON SPRZ.IDLEKA = LEKA.ID
-            LEFT JOIN PERS ON TRIM(SPRZ.ID_WYC) = TRIM(CAST(PERS.ID AS VARCHAR(30)))
-            LEFT JOIN AKSP ON AKSP.IDSPRZ = SPRZ.ID
+            LEFT JOIN PERS ON TRIM(COALESCE(
+                CAST(AKSP_LATEST.IDWYC2 AS VARCHAR(30)),
+                CAST(SPRZ.ID_WYC AS VARCHAR(30))
+            )) = TRIM(CAST(PERS.ID AS VARCHAR(30)))
             WHERE SPRZ.DATSP >= @DateFrom
               AND SPRZ.DATSP < @DateTo
               AND SPRZ.TYPSP = '80'
               AND SPRZ.ODPLT = '5'
-              AND SPRZ.WSKOR = '0'
-              AND SPRZ.WSKUS = '0'
-            GROUP BY
-                SPRZ.KODR1,
-                SPRZ.NRSRC,
-                SPRZ.NRORC,
-                SPRZ.EKLCZ,
-                SPRZ.DATSP,
-                SPRZ.GDZSP,
-                SPRZ.KDPLR,
-                SPRZ.ID_WYC,
-                SPRZ.IDPACA,
-                SPRZ.IDLEKA,
-                PERS.NAZWU,
-                PACA.NAZWU,
-                PACA.KDPCZ,
-                PACA.MIAST,
-                PACA.ULICA,
-                PACA.NRDOM,
-                LEKA.NAZWU
+              AND SPRZ.WSKOR = 0
+              AND SPRZ.WSKUS = 0
             ORDER BY SPRZ.DATSP DESC, SPRZ.NRSRC
             """;
 
@@ -85,22 +81,28 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var preparationDate = ReadDateTime(reader, "DATSP");
-            var seconds = ReadInt32(reader, "GDZSP");
-            if (seconds > 0)
+            var prescriptionNumber = ReadString(reader, "NRSRC");
+            var patientId = ReadString(reader, "IDPACA");
+
+            if (!IsZeroMarker(reader, "WSKOR_RECEPTY") || !IsZeroMarker(reader, "WSKUS_RECEPTY"))
             {
-                preparationDate = preparationDate.Date.AddSeconds(seconds);
+                continue;
             }
+
+            var preparationDate = ReadNullableDateTime(reader, "DATA_WYKONANIA") ?? DateTime.Today;
+            var saleDate = ReadNullableDateTime(reader, "DATA_SPRZEDAZY");
 
             var form = new ImportedForm
             {
                 SourcePrescriptionId = ReadString(reader, "KODR1"),
-                FirebirdPatientId = ReadString(reader, "IDPACA"),
+                FirebirdPatientId = patientId,
                 FirebirdDoctorId = ReadString(reader, "IDLEKA"),
-                PrescriptionNumber = ReadString(reader, "NRSRC"),
+                PrescriptionNumber = prescriptionNumber,
                 PrescriptionOrderNumber = ReadString(reader, "NRORC"),
                 PrescriptionBarcode = ReadString(reader, "EKLCZ"),
+                AcceptanceDate = ReadNullableDateTime(reader, "DATA_PRZYJECIA"),
                 PreparationDate = preparationDate,
+                SaleDate = saleDate,
                 DrugForm = MapDrugForm(ReadString(reader, "KDPLR")),
                 ExpiryTermText = FormatMedicineExpiryDate(ReadNullableDateTime(reader, "TERMIN_WAZNOSCI_LEKU"), preparationDate),
                 Dosage = "",
@@ -115,7 +117,7 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                     ReadString(reader, "ULICA"),
                     ReadString(reader, "NRDOM")),
                 DoctorName = ReadString(reader, "LEKARZ_NAZWA"),
-                PreparedByName = ReadString(reader, "SPORZADZAJACY_NAZWA", ReadString(reader, "ID_WYC"))
+                PreparedByName = ReadString(reader, "SPORZADZAJACY_NAZWA", ReadString(reader, "ID_WYKONAWCY"))
             };
 
             if (MatchesSearchText(form, searchText) && seenPrescriptionKeys.Add(BuildPrescriptionKey(form)))
@@ -178,8 +180,9 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
             WHERE SPRZ.KODR1 = @SourcePrescriptionId
               AND SPRZ.TYPSP = '50'
               AND SPRZ.POZRC <> '0'
-              AND SPRZ.WSKOR = '0'
-              AND SPRZ.WSKUS = '0'
+              AND SPRZ.ILOSP > 0
+              AND SPRZ.WSKOR = 0
+              AND SPRZ.WSKUS = 0
             ORDER BY SPRZ.POZRC
             """;
         command.Parameters.AddWithValue("@SourcePrescriptionId", form.SourcePrescriptionId);
@@ -238,6 +241,41 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
     private static bool Contains(string value, string searchText)
     {
         return value.IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0;
+    }
+
+    private static bool IsZeroMarker(FbDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return true;
+        }
+
+        var value = reader.GetValue(ordinal);
+        if (value is int intValue)
+        {
+            return intValue == 0;
+        }
+
+        if (value is short shortValue)
+        {
+            return shortValue == 0;
+        }
+
+        if (value is long longValue)
+        {
+            return longValue == 0;
+        }
+
+        if (value is decimal decimalValue)
+        {
+            return decimalValue == 0;
+        }
+
+        var text = Convert.ToString(value)?.Trim();
+        return string.IsNullOrWhiteSpace(text)
+            || decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var currentCultureValue) && currentCultureValue == 0
+            || decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var invariantCultureValue) && invariantCultureValue == 0;
     }
 
     private static string MapDrugForm(string code)

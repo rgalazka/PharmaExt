@@ -49,7 +49,9 @@ public sealed class LocalDatabaseService
                 PatientAddress TEXT NOT NULL,
                 DoctorName TEXT NOT NULL,
                 PreparedByName TEXT NOT NULL,
+                AcceptanceDate TEXT NULL,
                 PreparationDate TEXT NOT NULL,
+                SaleDate TEXT NULL,
                 DrugForm TEXT NOT NULL,
                 ExpiryTermText TEXT NOT NULL,
                 Dosage TEXT NOT NULL,
@@ -94,6 +96,8 @@ public sealed class LocalDatabaseService
         AddColumnIfMissing(connection, "AppSettings", "MaxUsedQuantityDeviationPercent", "REAL NOT NULL DEFAULT 0.6");
         AddColumnIfMissing(connection, "ImportedForms", "PrescriptionOrderNumber", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "ImportedForms", "PrescriptionBarcode", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "ImportedForms", "AcceptanceDate", "TEXT NULL");
+        AddColumnIfMissing(connection, "ImportedForms", "SaleDate", "TEXT NULL");
         AddColumnIfMissing(connection, "ImportedForms", "MixBeforeUse", "INTEGER NOT NULL DEFAULT 0");
     }
 
@@ -153,13 +157,13 @@ public sealed class LocalDatabaseService
         Execute(connection, transaction, """
             INSERT INTO ImportedForms (
                 SourcePrescriptionId, PrescriptionNumber, PrescriptionOrderNumber, PrescriptionBarcode, PatientName, PatientAddress, DoctorName,
-                PreparedByName, PreparationDate, DrugForm, ExpiryTermText, Dosage, StorageConditions,
+                PreparedByName, AcceptanceDate, PreparationDate, SaleDate, DrugForm, ExpiryTermText, Dosage, StorageConditions,
                 LabelType, LabelSize, ManualCalculations, ManualPreparationDescription,
                 ManualQualityControl, ManualFinalAssessment, ManualNotes, MixBeforeUse, Status, CreatedAt, UpdatedAt
             )
             VALUES (
                 $sourcePrescriptionId, $prescriptionNumber, $prescriptionOrderNumber, $prescriptionBarcode, $patientName, $patientAddress, $doctorName,
-                $preparedByName, $preparationDate, $drugForm, $expiryTermText, $dosage, $storageConditions,
+                $preparedByName, $acceptanceDate, $preparationDate, $saleDate, $drugForm, $expiryTermText, $dosage, $storageConditions,
                 $labelType, $labelSize, $manualCalculations, $manualPreparationDescription,
                 $manualQualityControl, $manualFinalAssessment, $manualNotes, $mixBeforeUse, $status, $now, $now
             )
@@ -171,7 +175,9 @@ public sealed class LocalDatabaseService
                 PatientAddress = excluded.PatientAddress,
                 DoctorName = excluded.DoctorName,
                 PreparedByName = excluded.PreparedByName,
+                AcceptanceDate = excluded.AcceptanceDate,
                 PreparationDate = excluded.PreparationDate,
+                SaleDate = excluded.SaleDate,
                 DrugForm = excluded.DrugForm,
                 ExpiryTermText = excluded.ExpiryTermText,
                 Dosage = excluded.Dosage,
@@ -195,7 +201,9 @@ public sealed class LocalDatabaseService
             ("$patientAddress", form.PatientAddress),
             ("$doctorName", form.DoctorName),
             ("$preparedByName", form.PreparedByName),
+            ("$acceptanceDate", form.AcceptanceDate?.ToString("O")),
             ("$preparationDate", form.PreparationDate.ToString("O")),
+            ("$saleDate", form.SaleDate?.ToString("O")),
             ("$drugForm", form.DrugForm),
             ("$expiryTermText", form.ExpiryTermText),
             ("$dosage", form.Dosage),

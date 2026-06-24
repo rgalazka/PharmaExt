@@ -34,6 +34,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         SaveCommand = new RelayCommand(Save);
         TestFirebirdConnectionCommand = new RelayCommand(TestFirebirdConnection);
         GenerateProtocolPdfCommand = new RelayCommand(GenerateProtocolPdf, () => SelectedForm is not null);
+        GenerateBatchPdfCommand = new RelayCommand(GenerateBatchPdf, () => ImportedForms.Count > 0);
         GenerateExternalLabelsCommand = new RelayCommand(() => GenerateLabels(LabelType.Zewnetrznie));
         GenerateInternalLabelsCommand = new RelayCommand(() => GenerateLabels(LabelType.Wewnetrznie));
 
@@ -84,6 +85,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand SaveCommand { get; }
     public ICommand TestFirebirdConnectionCommand { get; }
     public ICommand GenerateProtocolPdfCommand { get; }
+    public ICommand GenerateBatchPdfCommand { get; }
     public ICommand GenerateExternalLabelsCommand { get; }
     public ICommand GenerateInternalLabelsCommand { get; }
 
@@ -133,6 +135,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         SelectedForm = null;
+        (GenerateBatchPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private void LoadSelectedFormIngredients()
@@ -156,6 +159,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+    }
+
+    private void EnsureIngredientsLoaded(ImportedForm form)
+    {
+        if (form.IngredientsLoaded || string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            return;
+        }
+
+        var reader = new FirebirdPrescriptionReader(Settings);
+        reader.LoadIngredients(form);
+        form.IngredientsLoaded = true;
     }
 
     private void Save()
@@ -206,6 +221,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var filePath = Path.Combine(Settings.OutputDirectory, $"protokol_{prescriptionNumber}.pdf");
             _protocolPdfGenerator.GenerateProtocolWithA4Label(SelectedForm, Settings.Pharmacy, filePath);
             MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+    }
+
+    private void GenerateBatchPdf()
+    {
+        try
+        {
+            var forms = ImportedForms.ToList();
+            if (forms.Count == 0)
+            {
+                MessageBox.Show("Brak formularzy do wygenerowania.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            foreach (var form in forms)
+            {
+                EnsureIngredientsLoaded(form);
+            }
+
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var filePath = Path.Combine(Settings.OutputDirectory, $"protokoly_i_naklejki_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+            _protocolPdfGenerator.GenerateProtocolsWithA4Labels(forms, Settings.Pharmacy, filePath);
+            MessageBox.Show($"Wygenerowano PDF zbiorczy:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception exception)
         {

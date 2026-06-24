@@ -11,22 +11,38 @@ public sealed class ProtocolPdfGenerator
     {
         Document.Create(document =>
         {
-            document.Page(page =>
-            {
-                page.Size(PageSizes.A4);
-                page.Margin(10, Unit.Millimetre);
-                page.DefaultTextStyle(text => text.FontFamily("Arial").FontSize(7));
-                page.Content().Element(container => ComposeProtocol(container, form, pharmacy));
-            });
-
-            document.Page(page =>
-            {
-                page.Size(PageSizes.A4);
-                page.Margin(10, Unit.Millimetre);
-                page.DefaultTextStyle(text => text.FontFamily("Arial").FontSize(8));
-                page.Content().AlignCenter().AlignMiddle().Component(CreateA4LabelComponent(form, pharmacy));
-            });
+            AddProtocolWithA4Label(document, form, pharmacy);
         }).GeneratePdf(filePath);
+    }
+
+    public void GenerateProtocolsWithA4Labels(IReadOnlyList<ImportedForm> forms, PharmacySettings pharmacy, string filePath)
+    {
+        Document.Create(document =>
+        {
+            foreach (var form in forms)
+            {
+                AddProtocolWithA4Label(document, form, pharmacy);
+            }
+        }).GeneratePdf(filePath);
+    }
+
+    private static void AddProtocolWithA4Label(IDocumentContainer document, ImportedForm form, PharmacySettings pharmacy)
+    {
+        document.Page(page =>
+        {
+            page.Size(PageSizes.A4);
+            page.Margin(10, Unit.Millimetre);
+            page.DefaultTextStyle(text => text.FontFamily("Arial").FontSize(7));
+            page.Content().Element(container => ComposeProtocol(container, form, pharmacy));
+        });
+
+        document.Page(page =>
+        {
+            page.Size(PageSizes.A4);
+            page.Margin(10, Unit.Millimetre);
+            page.DefaultTextStyle(text => text.FontFamily("Arial").FontSize(8));
+            page.Content().AlignCenter().AlignMiddle().Component(CreateA4LabelComponent(form, pharmacy));
+        });
     }
 
     private static LabelPdfComponent CreateA4LabelComponent(ImportedForm form, PharmacySettings pharmacy)

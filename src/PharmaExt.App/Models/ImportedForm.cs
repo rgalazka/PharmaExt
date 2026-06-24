@@ -16,7 +16,9 @@ public sealed class ImportedForm
     public string PatientAddress { get; set; } = "";
     public string DoctorName { get; set; } = "";
     public string PreparedByName { get; set; } = "";
+    public DateTime? AcceptanceDate { get; set; }
     public DateTime PreparationDate { get; set; } = DateTime.Today;
+    public DateTime? SaleDate { get; set; }
     public string DrugForm { get; set; } = "";
     public string ExpiryTermText { get; set; } = "14 dni";
     public string Dosage { get; set; } = "";
