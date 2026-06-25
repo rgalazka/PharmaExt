@@ -51,6 +51,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ImportedForm> ImportedForms { get; } = new();
     public LabelType[] LabelTypes { get; } = Enum.GetValues<LabelType>();
     public LabelSize[] LabelSizes { get; } = Enum.GetValues<LabelSize>();
+    public LabelMedicineFormOption[] LabelMedicineFormOptions { get; } =
+    [
+        new("Unguentum", "maść"),
+        new("Pasta", "pasta"),
+        new("Cremor", "krem"),
+        new("Gelum", "żel"),
+        new("Solutio", "roztwór"),
+        new("Suspensio", "zawiesina"),
+        new("Emulsio", "emulsja"),
+        new("Pulvis", "proszek"),
+        new("Capsula", "kapsułka"),
+        new("Suppositorium", "czopek"),
+        new("Guttae", "krople"),
+        new("Mixtura", "mieszanka"),
+        new("Linimentum", "mazidło"),
+        new("Suppositoria", "czopki"),
+        new("Globuli vaginales", "globulki dopochwowe"),
+        new("Pulveres (Pulv.)", "proszki"),
+        new("Guttae ophthalmicae", "krople do oczu")
+    ];
     public string[] FirebirdCharsets { get; } = ["DOMYSLNE", "NONE", "ISO8859_2", "WIN1250", "UTF8"];
 
     public bool IsSearching

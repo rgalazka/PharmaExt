@@ -83,6 +83,8 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         {
             var prescriptionNumber = ReadString(reader, "NRSRC");
             var patientId = ReadString(reader, "IDPACA");
+            var drugFormCode = ReadString(reader, "KDPLR");
+            var labelMedicineForm = MapDefaultLabelMedicineForm(drugFormCode);
 
             if (!IsZeroMarker(reader, "WSKOR_RECEPTY") || !IsZeroMarker(reader, "WSKUS_RECEPTY"))
             {
@@ -103,9 +105,10 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
                 AcceptanceDate = ReadNullableDateTime(reader, "DATA_PRZYJECIA"),
                 PreparationDate = preparationDate,
                 SaleDate = saleDate,
-                DrugForm = MapDrugForm(ReadString(reader, "KDPLR")),
+                DrugForm = labelMedicineForm,
                 ExpiryTermText = FormatMedicineExpiryDate(ReadNullableDateTime(reader, "TERMIN_WAZNOSCI_LEKU"), preparationDate),
                 Dosage = "",
+                LabelMedicineForm = labelMedicineForm,
                 StorageConditions = "W suchym i chłodnym miejscu, temp. 2-8 st. C",
                 ManualCalculations = "Zgodnie z instrukcją numer: ____________________",
                 ManualPreparationDescription = "Zgodnie z instrukcją numer: ____________________",
@@ -294,6 +297,22 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
             "10" => "dla klein - do 500 gramów",
             "11" => "dla kropli do oczu, uszu i nosa w warunkach aseptycznych - do 10 gramów",
             _ => code
+        };
+    }
+
+    private static string MapDefaultLabelMedicineForm(string code)
+    {
+        return code.Trim() switch
+        {
+            "1" => "Pulveres (Pulv.)",
+            "3" => "Suppositoria",
+            "4" => "Mixtura",
+            "5" => "Solutio",
+            "6" => "Unguentum",
+            "7" => "Guttae",
+            "9" => "Pulveres",
+            "11" => "Guttae ophthalmicae",
+            _ => ""
         };
     }
 

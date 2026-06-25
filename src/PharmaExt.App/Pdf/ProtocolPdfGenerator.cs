@@ -77,7 +77,7 @@ public sealed class ProtocolPdfGenerator
                     Cell(table, "Pacjent", form.PatientName);
                     Cell(table, "Adres pacjenta", form.PatientAddress);
                     Cell(table, "Data sporządzenia", form.PreparationDate.ToString("dd.MM.yyyy"));
-                    Cell(table, "Postać leku", form.DrugForm);
+                    Cell(table, "Postać leku", BuildDrugFormText(form));
                     Cell(table, "Termin ważności leku", form.ExpiryTermText);
                     Cell(table, "Osoba sporządzająca", form.PreparedByName);
                     Cell(table, "Lekarz", form.DoctorName);
@@ -156,8 +156,8 @@ public sealed class ProtocolPdfGenerator
                         columns.RelativeColumn();
                     });
 
-                    BodyCell(table, $"Lek sporządził: {form.PreparedByName}\n\nPodpis:");
-                    BodyCell(table, "Sprawdził / osoba odpowiedzialna:\n\nPodpis:");
+                    SignatureCell(table, $"Lek sporządził: {form.PreparedByName}\n\nPodpis:");
+                    SignatureCell(table, "Sprawdził / osoba odpowiedzialna:\n\nPodpis:");
                 });
             });
         });
@@ -192,8 +192,8 @@ public sealed class ProtocolPdfGenerator
                 return;
             }
 
-            column.Item().Width(122, Unit.Millimetre).Height(6.4f, Unit.Millimetre).Svg(Code128Barcode.CreateSvg(value, 28));
-            column.Item().Width(122, Unit.Millimetre).AlignCenter().Text(value).FontSize(5);
+            column.Item().Width(180, Unit.Millimetre).Height(6.4f, Unit.Millimetre).Svg(Code128Barcode.CreateSvg(value, 28, 1.55f));
+            column.Item().Width(180, Unit.Millimetre).AlignCenter().Text(value).FontSize(5);
         });
     }
 
@@ -204,6 +204,11 @@ public sealed class ProtocolPdfGenerator
             : $"{form.PrescriptionNumber}/{form.PrescriptionOrderNumber}";
     }
 
+    private static string BuildDrugFormText(ImportedForm form)
+    {
+        return string.IsNullOrWhiteSpace(form.LabelMedicineForm) ? form.DrugForm : form.LabelMedicineForm;
+    }
+
     private static void HeaderCell(TableDescriptor table, string value)
     {
         table.Cell().Border(0.5f).Background("#E8EEF5").Padding(2).AlignCenter().Text(value).Bold().FontSize(6);
@@ -212,6 +217,11 @@ public sealed class ProtocolPdfGenerator
     private static void BodyCell(TableDescriptor table, string value)
     {
         table.Cell().Border(0.5f).MinHeight(10).Padding(2).Text(value).FontSize(6);
+    }
+
+    private static void SignatureCell(TableDescriptor table, string value)
+    {
+        table.Cell().Border(0.5f).MinHeight(28, Unit.Millimetre).Padding(2).Text(value).FontSize(6);
     }
 
     private static void BodyCellRight(TableDescriptor table, string value)

@@ -25,6 +25,7 @@ public sealed class ImportedForm
     public string StorageConditions { get; set; } = "";
     public LabelType LabelType { get; set; } = LabelType.Zewnetrznie;
     public LabelSize LabelSize { get; set; } = LabelSize.Duza;
+    public string LabelMedicineForm { get; set; } = "Solutio";
     public string ManualCalculations { get; set; } = "";
     public string ManualPreparationDescription { get; set; } = "";
     public string ManualQualityControl { get; set; } = "";

@@ -40,6 +40,7 @@ public sealed class MockFirebirdPrescriptionReader : IFirebirdPrescriptionReader
             StorageConditions = "W suchym i chłodnym miejscu, temp. 2-8 st. C",
             LabelType = labelType,
             LabelSize = labelSize,
+            LabelMedicineForm = "Solutio",
             ManualCalculations = "Zgodnie z instrukcją numer: ____________________",
             ManualPreparationDescription = "Zgodnie z instrukcją numer: ____________________",
             ManualQualityControl = "Nieprawidłowości nie stwierdzono",

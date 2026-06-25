@@ -58,6 +58,7 @@ public sealed class LocalDatabaseService
                 StorageConditions TEXT NOT NULL,
                 LabelType TEXT NOT NULL,
                 LabelSize TEXT NOT NULL,
+                LabelMedicineForm TEXT NOT NULL DEFAULT 'Solutio',
                 ManualCalculations TEXT NOT NULL,
                 ManualPreparationDescription TEXT NOT NULL,
                 ManualQualityControl TEXT NOT NULL,
@@ -98,6 +99,7 @@ public sealed class LocalDatabaseService
         AddColumnIfMissing(connection, "ImportedForms", "PrescriptionBarcode", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "ImportedForms", "AcceptanceDate", "TEXT NULL");
         AddColumnIfMissing(connection, "ImportedForms", "SaleDate", "TEXT NULL");
+        AddColumnIfMissing(connection, "ImportedForms", "LabelMedicineForm", "TEXT NOT NULL DEFAULT 'Solutio'");
         AddColumnIfMissing(connection, "ImportedForms", "MixBeforeUse", "INTEGER NOT NULL DEFAULT 0");
     }
 
@@ -158,13 +160,13 @@ public sealed class LocalDatabaseService
             INSERT INTO ImportedForms (
                 SourcePrescriptionId, PrescriptionNumber, PrescriptionOrderNumber, PrescriptionBarcode, PatientName, PatientAddress, DoctorName,
                 PreparedByName, AcceptanceDate, PreparationDate, SaleDate, DrugForm, ExpiryTermText, Dosage, StorageConditions,
-                LabelType, LabelSize, ManualCalculations, ManualPreparationDescription,
+                LabelType, LabelSize, LabelMedicineForm, ManualCalculations, ManualPreparationDescription,
                 ManualQualityControl, ManualFinalAssessment, ManualNotes, MixBeforeUse, Status, CreatedAt, UpdatedAt
             )
             VALUES (
                 $sourcePrescriptionId, $prescriptionNumber, $prescriptionOrderNumber, $prescriptionBarcode, $patientName, $patientAddress, $doctorName,
                 $preparedByName, $acceptanceDate, $preparationDate, $saleDate, $drugForm, $expiryTermText, $dosage, $storageConditions,
-                $labelType, $labelSize, $manualCalculations, $manualPreparationDescription,
+                $labelType, $labelSize, $labelMedicineForm, $manualCalculations, $manualPreparationDescription,
                 $manualQualityControl, $manualFinalAssessment, $manualNotes, $mixBeforeUse, $status, $now, $now
             )
             ON CONFLICT(SourcePrescriptionId) DO UPDATE SET
@@ -184,6 +186,7 @@ public sealed class LocalDatabaseService
                 StorageConditions = excluded.StorageConditions,
                 LabelType = excluded.LabelType,
                 LabelSize = excluded.LabelSize,
+                LabelMedicineForm = excluded.LabelMedicineForm,
                 ManualCalculations = excluded.ManualCalculations,
                 ManualPreparationDescription = excluded.ManualPreparationDescription,
                 ManualQualityControl = excluded.ManualQualityControl,
@@ -210,6 +213,7 @@ public sealed class LocalDatabaseService
             ("$storageConditions", form.StorageConditions),
             ("$labelType", form.LabelType.ToString()),
             ("$labelSize", form.LabelSize.ToString()),
+            ("$labelMedicineForm", form.LabelMedicineForm),
             ("$manualCalculations", form.ManualCalculations),
             ("$manualPreparationDescription", form.ManualPreparationDescription),
             ("$manualQualityControl", form.ManualQualityControl),

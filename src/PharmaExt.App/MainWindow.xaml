@@ -144,6 +144,13 @@
                                     <TextBlock Text="Rozmiar" />
                                     <ComboBox SelectedItem="{Binding LabelSize}" ItemsSource="{Binding DataContext.LabelSizes, RelativeSource={RelativeSource AncestorType=Window}}" />
                                 </StackPanel>
+                                <StackPanel Margin="0,8,12,0">
+                                    <TextBlock Text="M.f." />
+                                    <ComboBox ItemsSource="{Binding DataContext.LabelMedicineFormOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectedValuePath="LatinName"
+                                              SelectedValue="{Binding LabelMedicineForm}" />
+                                </StackPanel>
                                 <StackPanel Margin="0,8,0,0" VerticalAlignment="Bottom">
                                     <CheckBox Content="ZMIESZAĆ PRZED UŻYCIEM"
                                               IsChecked="{Binding MixBeforeUse}"

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Globalization;
 
 namespace PharmaExt.App.Pdf;
 
@@ -59,18 +60,22 @@ public static class Code128Barcode
         return modules;
     }
 
-    public static string CreateSvg(string value, int height = 34)
+    public static string CreateSvg(string value, int height = 34, float moduleWidth = 1)
     {
         var modules = CreateModules(value);
+        var svgWidth = modules.Count * moduleWidth;
+        var svgWidthText = svgWidth.ToString("0.###", CultureInfo.InvariantCulture);
+        var moduleWidthText = moduleWidth.ToString("0.###", CultureInfo.InvariantCulture);
         var builder = new StringBuilder();
-        builder.Append($"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {modules.Count} {height}" preserveAspectRatio="none">""");
+        builder.Append($"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svgWidthText} {height}" preserveAspectRatio="none">""");
         builder.Append("""<rect width="100%" height="100%" fill="white"/>""");
 
         for (var index = 0; index < modules.Count; index++)
         {
             if (modules[index])
             {
-                builder.Append($"""<rect x="{index}" y="0" width="1" height="{height}" fill="black"/>""");
+                var x = (index * moduleWidth).ToString("0.###", CultureInfo.InvariantCulture);
+                builder.Append($"""<rect x="{x}" y="0" width="{moduleWidthText}" height="{height}" fill="black"/>""");
             }
         }
 

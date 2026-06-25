@@ -88,11 +88,11 @@ public sealed class LabelPdfComponent : IComponent
                                         ingredients.Item().Row(ingredientRow =>
                                         {
                                             ingredientRow.RelativeItem().Text(ingredient.Name).Italic().Bold().FontSize(6.5f);
-                                            ingredientRow.ConstantItem(22, Unit.Millimetre).AlignRight().Text(FormatLabelQuantity(ingredient.PrescribedQuantity)).Italic().Bold().FontSize(6.5f);
+                                            ingredientRow.ConstantItem(28, Unit.Millimetre).AlignRight().Text(FormatLabelQuantity(ingredient)).Italic().Bold().FontSize(6.5f);
                                         });
                                     }
 
-                                    ingredients.Item().Text("M.f. sol").Italic().Bold().FontSize(6.5f);
+                                    ingredients.Item().Text(FormatMfLine(_form.LabelMedicineForm)).Italic().Bold().FontSize(6.5f);
                                 });
                             });
 
@@ -132,9 +132,16 @@ public sealed class LabelPdfComponent : IComponent
         return !string.Equals(ingredient.Unit.Trim(), "szt", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string FormatLabelQuantity(decimal value)
+    private static string FormatLabelQuantity(ImportedFormIngredient ingredient)
     {
-        return value.ToString("0.0#");
+        var quantity = ingredient.PrescribedQuantity.ToString("0.0#");
+        var unit = ingredient.Unit.Trim();
+        return string.IsNullOrWhiteSpace(unit) ? quantity : $"{quantity} {unit}";
+    }
+
+    private static string FormatMfLine(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "M.f." : $"M.f. {value.Trim()}";
     }
 
     private string LabelTypeText() => _form.LabelType == LabelType.Zewnetrznie ? "Z E W N Ę T R Z N I E" : "W E W N Ę T R Z N I E";
