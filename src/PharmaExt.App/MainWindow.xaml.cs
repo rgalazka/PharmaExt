@@ -9,7 +9,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new MainViewModel();
+        var viewModel = new MainViewModel();
+        DataContext = viewModel;
+        FirebirdPasswordBox.Password = viewModel.Settings.Firebird.Password;
     }
 
     private void FirebirdPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -17,6 +19,14 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel viewModel && sender is PasswordBox passwordBox)
         {
             viewModel.Settings.Firebird.Password = passwordBox.Password;
+        }
+    }
+
+    private void ImportedFormsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && sender is DataGrid dataGrid)
+        {
+            viewModel.SetSelectedImportedForms(dataGrid.SelectedItems.OfType<Models.ImportedForm>());
         }
     }
 }

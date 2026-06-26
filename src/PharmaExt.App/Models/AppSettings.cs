@@ -22,5 +22,5 @@ public sealed class FirebirdSettings
     public string DatabasePath { get; set; } = @"D:\BazaApteka\WAPTEKA.FDB";
     public string User { get; set; } = "SYSDBA";
     public string Password { get; set; } = "masterkey";
-    public string Charset { get; set; } = "DOMYSLNE";
+    public string Charset { get; set; } = "WIN1250";
 }

@@ -87,12 +87,45 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <DataGrid ItemsSource="{Binding ImportedForms}"
+                    <DataGrid x:Name="ImportedFormsGrid"
+                              ItemsSource="{Binding ImportedForms}"
                               SelectedItem="{Binding SelectedForm}"
                               AutoGenerateColumns="False"
-                              IsReadOnly="True">
+                              IsReadOnly="True"
+                              SelectionMode="Extended"
+                              SelectionChanged="ImportedFormsGrid_SelectionChanged">
+                        <DataGrid.CellStyle>
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="Black" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="Black" />
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.CellStyle>
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="{Binding CompositionGroupBrush}" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="{Binding CompositionGroupBrush}" />
+                                        <Setter Property="BorderBrush" Value="#2563EB" />
+                                        <Setter Property="BorderThickness" Value="2" />
+                                        <Setter Property="Foreground" Value="Black" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Lp." Binding="{Binding DisplayNumber}" Width="45" />
+                            <DataGridCheckBoxColumn Header="Edited" Binding="{Binding IsEditedThisSession, Mode=OneWay}" Width="55" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Sklad" Binding="{Binding CompositionGroupLabel}" SortMemberPath="CompositionGroupSort" Width="55" />
                             <DataGridTextColumn Header="Nr recepty" Binding="{Binding PrescriptionNumber}" Width="100" />
                             <DataGridTextColumn Header="Pacjent" Binding="{Binding PatientName}" Width="210" />
                             <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90" />
@@ -100,7 +133,38 @@
                     </DataGrid>
 
                     <ScrollViewer Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel DataContext="{Binding SelectedForm}">
+                        <StackPanel>
+                            <Border BorderBrush="#D1D5DB" BorderThickness="1" Padding="10" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="Edycja zbiorcza zaznaczonych recept" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                    <UniformGrid Columns="3">
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Pole" />
+                                            <ComboBox ItemsSource="{Binding BatchEditFields}"
+                                                      DisplayMemberPath="DisplayName"
+                                                      SelectedItem="{Binding SelectedBatchEditField}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Wartosc" />
+                                            <TextBox Text="{Binding BatchEditValue, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel VerticalAlignment="Bottom">
+                                            <Button Content="Ustaw dla zaznaczonych"
+                                                    Command="{Binding ApplyBatchEditCommand}"
+                                                    Height="28" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <TextBlock Text="{Binding SelectedImportedForms.Count, StringFormat=Zaznaczone recepty: {0}}" Margin="0,8,0,0" />
+                                    <Button Content="Kopiuj zaznaczone pola z formularza"
+                                            Command="{Binding CopyCheckedFieldsCommand}"
+                                            Width="250"
+                                            Height="28"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel DataContext="{Binding SelectedForm}">
                             <TextBlock Text="Edycja formularza" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,12" />
 
                             <UniformGrid Columns="2" Margin="0,0,0,12">
@@ -137,21 +201,34 @@
                             <TextBlock Text="Etykieta" FontWeight="SemiBold" Margin="0,6,0,6" />
                             <UniformGrid Columns="2" Margin="0,0,0,12">
                                 <StackPanel Margin="0,0,12,0">
-                                    <TextBlock Text="Typ" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox IsChecked="{Binding DataContext.CopyLabelType, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                        <TextBlock Text="Typ" />
+                                    </StackPanel>
                                     <ComboBox SelectedItem="{Binding LabelType}" ItemsSource="{Binding DataContext.LabelTypes, RelativeSource={RelativeSource AncestorType=Window}}" />
                                 </StackPanel>
                                 <StackPanel>
-                                    <TextBlock Text="Rozmiar" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox IsChecked="{Binding DataContext.CopyLabelSize, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                        <TextBlock Text="Rozmiar" />
+                                    </StackPanel>
                                     <ComboBox SelectedItem="{Binding LabelSize}" ItemsSource="{Binding DataContext.LabelSizes, RelativeSource={RelativeSource AncestorType=Window}}" />
                                 </StackPanel>
                                 <StackPanel Margin="0,8,12,0">
-                                    <TextBlock Text="M.f." />
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox IsChecked="{Binding DataContext.CopyLabelMedicineForm, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                        <TextBlock Text="M.f." />
+                                    </StackPanel>
                                     <ComboBox ItemsSource="{Binding DataContext.LabelMedicineFormOptions, RelativeSource={RelativeSource AncestorType=Window}}"
                                               DisplayMemberPath="DisplayName"
                                               SelectedValuePath="LatinName"
                                               SelectedValue="{Binding LabelMedicineForm}" />
                                 </StackPanel>
                                 <StackPanel Margin="0,8,0,0" VerticalAlignment="Bottom">
+                                    <CheckBox Content="kopiuj"
+                                              IsChecked="{Binding DataContext.CopyMixBeforeUse, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Background="#DBEAFE"
+                                              Margin="0,0,0,4" />
                                     <CheckBox Content="ZMIESZAĆ PRZED UŻYCIEM"
                                               IsChecked="{Binding MixBeforeUse}"
                                               FontWeight="SemiBold" />
@@ -177,16 +254,32 @@
                             </DataGrid>
 
                             <TextBlock Text="Pola robocze" FontWeight="SemiBold" Margin="0,16,0,6" />
-                            <TextBlock Text="Obliczenia" />
+                            <StackPanel Orientation="Horizontal">
+                                <CheckBox IsChecked="{Binding DataContext.CopyManualCalculations, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                <TextBlock Text="Obliczenia" />
+                            </StackPanel>
                             <TextBox Text="{Binding ManualCalculations}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
-                            <TextBlock Text="Opis wykonania" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <CheckBox IsChecked="{Binding DataContext.CopyManualPreparationDescription, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                <TextBlock Text="Opis wykonania" />
+                            </StackPanel>
                             <TextBox Text="{Binding ManualPreparationDescription}" AcceptsReturn="True" Height="90" TextWrapping="Wrap" />
-                            <TextBlock Text="Kontrola koncowa" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <CheckBox IsChecked="{Binding DataContext.CopyManualQualityControl, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                <TextBlock Text="Kontrola koncowa" />
+                            </StackPanel>
                             <TextBox Text="{Binding ManualQualityControl}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
-                            <TextBlock Text="Dawkowanie" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <CheckBox IsChecked="{Binding DataContext.CopyDosage, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                <TextBlock Text="Dawkowanie" />
+                            </StackPanel>
                             <TextBox Text="{Binding Dosage}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
-                            <TextBlock Text="Uwagi" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <CheckBox IsChecked="{Binding DataContext.CopyManualNotes, RelativeSource={RelativeSource AncestorType=Window}}" Background="#DBEAFE" Margin="0,0,6,0" />
+                                <TextBlock Text="Uwagi" />
+                            </StackPanel>
                             <TextBox Text="{Binding ManualNotes}" AcceptsReturn="True" Height="70" TextWrapping="Wrap" />
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -199,24 +292,25 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="Dane apteki" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
                         <TextBlock Text="Nazwa apteki" />
-                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyName}" />
+                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyName, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Text="Adres apteki" Margin="0,8,0,0" />
-                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyAddress}" />
+                        <TextBox Text="{Binding Settings.Pharmacy.PharmacyAddress, UpdateSourceTrigger=PropertyChanged}" />
 
                         <TextBlock Text="Firebird" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
                         <TextBlock Text="Host" />
-                        <TextBox Text="{Binding Settings.Firebird.Host}" />
+                        <TextBox Text="{Binding Settings.Firebird.Host, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Text="Sciezka bazy" Margin="0,8,0,0" />
-                        <TextBox Text="{Binding Settings.Firebird.DatabasePath}" />
+                        <TextBox Text="{Binding Settings.Firebird.DatabasePath, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Text="Uzytkownik" Margin="0,8,0,0" />
-                        <TextBox Text="{Binding Settings.Firebird.User}" />
+                        <TextBox Text="{Binding Settings.Firebird.User, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Text="Haslo" Margin="0,8,0,0" />
-                        <PasswordBox Password="masterkey" PasswordChanged="FirebirdPasswordBox_PasswordChanged" />
+                        <PasswordBox x:Name="FirebirdPasswordBox" PasswordChanged="FirebirdPasswordBox_PasswordChanged" />
                         <TextBlock Text="Kodowanie" Margin="0,8,0,0" />
-                        <ComboBox SelectedItem="{Binding Settings.Firebird.Charset}"
+                        <ComboBox SelectedItem="{Binding Settings.Firebird.Charset, UpdateSourceTrigger=PropertyChanged}"
                                   ItemsSource="{Binding FirebirdCharsets}" />
                         <Button Content="Test polaczenia"
                                 Command="{Binding TestFirebirdConnectionCommand}"
@@ -225,11 +319,22 @@
                                 HorizontalAlignment="Left"
                                 Margin="0,12,0,0" />
 
+                    </StackPanel>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Column="1" Margin="32,0,0,0" MaxWidth="460" HorizontalAlignment="Left">
+                        <TextBlock Text="Dane lokalne" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <Button Content="Reset bazy lokalnej"
+                                Command="{Binding ResetLocalDataCommand}"
+                                Width="160"
+                                Height="32"
+                                HorizontalAlignment="Left" />
+
                         <TextBlock Text="PDF" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,8" />
                         <TextBlock Text="Katalog zapisu" />
-                        <TextBox Text="{Binding Settings.OutputDirectory}" />
+                        <TextBox Text="{Binding Settings.OutputDirectory, UpdateSourceTrigger=PropertyChanged}" Width="420" HorizontalAlignment="Left" />
                         <TextBlock Text="Maks. odchył ilości użytej (%)" Margin="0,8,0,0" />
-                        <TextBox Text="{Binding Settings.MaxUsedQuantityDeviationPercent, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBox Text="{Binding Settings.MaxUsedQuantityDeviationPercent, UpdateSourceTrigger=PropertyChanged}" Width="160" HorizontalAlignment="Left" />
                     </StackPanel>
                 </Grid>
             </TabItem>

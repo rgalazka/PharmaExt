@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Data.Sqlite;
 using PharmaExt.App.Models;
 
@@ -7,9 +8,9 @@ public sealed class LocalDatabaseService
 {
     private readonly string _databasePath;
 
-    public LocalDatabaseService(string databasePath = "pharmaext.sqlite")
+    public LocalDatabaseService(string? databasePath = null)
     {
-        _databasePath = databasePath;
+        _databasePath = databasePath ?? GetDefaultDatabasePath();
     }
 
     public void Initialize()
@@ -23,6 +24,7 @@ public sealed class LocalDatabaseService
                 FirebirdDatabasePath TEXT NOT NULL,
                 FirebirdUser TEXT NOT NULL,
                 FirebirdPasswordEncrypted TEXT NOT NULL,
+                FirebirdCharset TEXT NOT NULL DEFAULT 'WIN1250',
                 OutputDirectory TEXT NOT NULL,
                 DefaultLabelType TEXT NOT NULL,
                 DefaultLabelSize TEXT NOT NULL,
@@ -94,6 +96,7 @@ public sealed class LocalDatabaseService
             );
             """;
         command.ExecuteNonQuery();
+        AddColumnIfMissing(connection, "AppSettings", "FirebirdCharset", "TEXT NOT NULL DEFAULT 'WIN1250'");
         AddColumnIfMissing(connection, "AppSettings", "MaxUsedQuantityDeviationPercent", "REAL NOT NULL DEFAULT 0.6");
         AddColumnIfMissing(connection, "ImportedForms", "PrescriptionOrderNumber", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "ImportedForms", "PrescriptionBarcode", "TEXT NOT NULL DEFAULT ''");
@@ -111,14 +114,15 @@ public sealed class LocalDatabaseService
         Execute(connection, transaction, """
             INSERT INTO AppSettings (
                 Id, FirebirdHost, FirebirdDatabasePath, FirebirdUser, FirebirdPasswordEncrypted,
-                OutputDirectory, DefaultLabelType, DefaultLabelSize, MaxUsedQuantityDeviationPercent, CreatedAt, UpdatedAt
+                FirebirdCharset, OutputDirectory, DefaultLabelType, DefaultLabelSize, MaxUsedQuantityDeviationPercent, CreatedAt, UpdatedAt
             )
-            VALUES (1, $host, $databasePath, $user, $password, $output, $labelType, $labelSize, $maxDeviationPercent, $now, $now)
+            VALUES (1, $host, $databasePath, $user, $password, $charset, $output, $labelType, $labelSize, $maxDeviationPercent, $now, $now)
             ON CONFLICT(Id) DO UPDATE SET
                 FirebirdHost = excluded.FirebirdHost,
                 FirebirdDatabasePath = excluded.FirebirdDatabasePath,
                 FirebirdUser = excluded.FirebirdUser,
                 FirebirdPasswordEncrypted = excluded.FirebirdPasswordEncrypted,
+                FirebirdCharset = excluded.FirebirdCharset,
                 OutputDirectory = excluded.OutputDirectory,
                 DefaultLabelType = excluded.DefaultLabelType,
                 DefaultLabelSize = excluded.DefaultLabelSize,
@@ -129,6 +133,7 @@ public sealed class LocalDatabaseService
             ("$databasePath", settings.Firebird.DatabasePath),
             ("$user", settings.Firebird.User),
             ("$password", settings.Firebird.Password),
+            ("$charset", settings.Firebird.Charset),
             ("$output", settings.OutputDirectory),
             ("$labelType", settings.DefaultLabelType.ToString()),
             ("$labelSize", settings.DefaultLabelSize.ToString()),
@@ -148,6 +153,62 @@ public sealed class LocalDatabaseService
             ("$now", DateTime.Now.ToString("O")));
 
         transaction.Commit();
+    }
+
+    public AppSettings LoadSettings()
+    {
+        var settings = new AppSettings();
+        using var connection = OpenConnection();
+
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT
+                    FirebirdHost,
+                    FirebirdDatabasePath,
+                    FirebirdUser,
+                    FirebirdPasswordEncrypted,
+                    FirebirdCharset,
+                    OutputDirectory,
+                    DefaultLabelType,
+                    DefaultLabelSize,
+                    MaxUsedQuantityDeviationPercent
+                FROM AppSettings
+                WHERE Id = 1;
+                """;
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                settings.Firebird.Host = ReadString(reader, "FirebirdHost", settings.Firebird.Host);
+                settings.Firebird.DatabasePath = ReadString(reader, "FirebirdDatabasePath", settings.Firebird.DatabasePath);
+                settings.Firebird.User = ReadString(reader, "FirebirdUser", settings.Firebird.User);
+                settings.Firebird.Password = ReadString(reader, "FirebirdPasswordEncrypted", settings.Firebird.Password);
+                settings.Firebird.Charset = ReadString(reader, "FirebirdCharset", settings.Firebird.Charset);
+                settings.OutputDirectory = ReadString(reader, "OutputDirectory", settings.OutputDirectory);
+                settings.DefaultLabelType = ReadEnum(reader, "DefaultLabelType", settings.DefaultLabelType);
+                settings.DefaultLabelSize = ReadEnum(reader, "DefaultLabelSize", settings.DefaultLabelSize);
+                settings.MaxUsedQuantityDeviationPercent = ReadDecimal(reader, "MaxUsedQuantityDeviationPercent", settings.MaxUsedQuantityDeviationPercent);
+            }
+        }
+
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT PharmacyName, PharmacyAddress
+                FROM PharmacySettings
+                WHERE Id = 1;
+                """;
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                settings.Pharmacy.PharmacyName = ReadString(reader, "PharmacyName", settings.Pharmacy.PharmacyName);
+                settings.Pharmacy.PharmacyAddress = ReadString(reader, "PharmacyAddress", settings.Pharmacy.PharmacyAddress);
+            }
+        }
+
+        return settings;
     }
 
     public void UpsertImportedForm(ImportedForm form)
@@ -229,39 +290,155 @@ public sealed class LocalDatabaseService
         idCommand.Parameters.AddWithValue("$sourcePrescriptionId", form.SourcePrescriptionId);
         var formId = Convert.ToInt32(idCommand.ExecuteScalar());
 
-        Execute(connection, transaction, "DELETE FROM ImportedFormIngredients WHERE ImportedFormId = $formId;", ("$formId", formId));
-
-        foreach (var ingredient in form.Ingredients)
+        if (form.IngredientsLoaded)
         {
-            Execute(connection, transaction, """
-                INSERT INTO ImportedFormIngredients (
-                    ImportedFormId, Lp, Name, PrescribedQuantity, Unit, UsedQuantity,
-                    BatchNumber, ExpiryDate, ManufacturerSupplier
-                )
-                VALUES (
-                    $formId, $lp, $name, $prescribedQuantity, $unit, $usedQuantity,
-                    $batchNumber, $expiryDate, $manufacturerSupplier
-                );
-                """,
-                ("$formId", formId),
-                ("$lp", ingredient.Lp),
-                ("$name", ingredient.Name),
-                ("$prescribedQuantity", ingredient.PrescribedQuantity),
-                ("$unit", ingredient.Unit),
-                ("$usedQuantity", ingredient.UsedQuantity),
-                ("$batchNumber", ingredient.BatchNumber),
-                ("$expiryDate", ingredient.ExpiryDate?.ToString("O")),
-                ("$manufacturerSupplier", ingredient.ManufacturerSupplier));
+            Execute(connection, transaction, "DELETE FROM ImportedFormIngredients WHERE ImportedFormId = $formId;", ("$formId", formId));
+
+            foreach (var ingredient in form.Ingredients)
+            {
+                Execute(connection, transaction, """
+                    INSERT INTO ImportedFormIngredients (
+                        ImportedFormId, Lp, Name, PrescribedQuantity, Unit, UsedQuantity,
+                        BatchNumber, ExpiryDate, ManufacturerSupplier
+                    )
+                    VALUES (
+                        $formId, $lp, $name, $prescribedQuantity, $unit, $usedQuantity,
+                        $batchNumber, $expiryDate, $manufacturerSupplier
+                    );
+                    """,
+                    ("$formId", formId),
+                    ("$lp", ingredient.Lp),
+                    ("$name", ingredient.Name),
+                    ("$prescribedQuantity", ingredient.PrescribedQuantity),
+                    ("$unit", ingredient.Unit),
+                    ("$usedQuantity", ingredient.UsedQuantity),
+                    ("$batchNumber", ingredient.BatchNumber),
+                    ("$expiryDate", ingredient.ExpiryDate?.ToString("O")),
+                    ("$manufacturerSupplier", ingredient.ManufacturerSupplier));
+            }
         }
 
         transaction.Commit();
     }
 
+    public void ResetLocalData()
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        Execute(connection, transaction, "DELETE FROM ImportedFormIngredients;");
+        Execute(connection, transaction, "DELETE FROM GeneratedDocuments;");
+        Execute(connection, transaction, "DELETE FROM ImportedForms;");
+
+        transaction.Commit();
+    }
+
+    public IReadOnlyList<ImportedForm> SearchImportedForms(DateTime? dateFrom, DateTime? dateTo, string searchText)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                Id,
+                SourcePrescriptionId,
+                PrescriptionNumber,
+                PrescriptionOrderNumber,
+                PrescriptionBarcode,
+                PatientName,
+                PatientAddress,
+                DoctorName,
+                PreparedByName,
+                AcceptanceDate,
+                PreparationDate,
+                SaleDate,
+                DrugForm,
+                ExpiryTermText,
+                Dosage,
+                StorageConditions,
+                LabelType,
+                LabelSize,
+                LabelMedicineForm,
+                ManualCalculations,
+                ManualPreparationDescription,
+                ManualQualityControl,
+                ManualFinalAssessment,
+                ManualNotes,
+                MixBeforeUse,
+                Status
+            FROM ImportedForms
+            WHERE PreparationDate >= $dateFrom
+              AND PreparationDate < $dateTo
+              AND (
+                  $searchText = ''
+                  OR PatientName LIKE $searchPattern
+                  OR PatientAddress LIKE $searchPattern
+                  OR PrescriptionNumber LIKE $searchPattern
+              )
+            ORDER BY PreparationDate DESC, PrescriptionNumber;
+            """;
+
+        var dateFromValue = (dateFrom?.Date ?? DateTime.Today.AddDays(-7)).ToString("O");
+        var dateToValue = (dateTo?.Date ?? DateTime.Today).AddDays(1).ToString("O");
+        var trimmedSearchText = searchText.Trim();
+        command.Parameters.AddWithValue("$dateFrom", dateFromValue);
+        command.Parameters.AddWithValue("$dateTo", dateToValue);
+        command.Parameters.AddWithValue("$searchText", trimmedSearchText);
+        command.Parameters.AddWithValue("$searchPattern", $"%{trimmedSearchText}%");
+
+        var forms = new List<ImportedForm>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var form = new ImportedForm
+            {
+                Id = ReadInt32(reader, "Id"),
+                SourcePrescriptionId = ReadString(reader, "SourcePrescriptionId", ""),
+                PrescriptionNumber = ReadString(reader, "PrescriptionNumber", ""),
+                PrescriptionOrderNumber = ReadString(reader, "PrescriptionOrderNumber", ""),
+                PrescriptionBarcode = ReadString(reader, "PrescriptionBarcode", ""),
+                PatientName = ReadString(reader, "PatientName", ""),
+                PatientAddress = ReadString(reader, "PatientAddress", ""),
+                DoctorName = ReadString(reader, "DoctorName", ""),
+                PreparedByName = ReadString(reader, "PreparedByName", ""),
+                AcceptanceDate = ReadNullableDateTime(reader, "AcceptanceDate"),
+                PreparationDate = ReadDateTime(reader, "PreparationDate", DateTime.Today),
+                SaleDate = ReadNullableDateTime(reader, "SaleDate"),
+                DrugForm = ReadString(reader, "DrugForm", ""),
+                ExpiryTermText = ReadString(reader, "ExpiryTermText", ""),
+                Dosage = ReadString(reader, "Dosage", ""),
+                StorageConditions = ReadString(reader, "StorageConditions", ""),
+                LabelType = ReadEnum(reader, "LabelType", LabelType.Zewnetrznie),
+                LabelSize = ReadEnum(reader, "LabelSize", LabelSize.Duza),
+                LabelMedicineForm = ReadString(reader, "LabelMedicineForm", ""),
+                ManualCalculations = ReadString(reader, "ManualCalculations", ""),
+                ManualPreparationDescription = ReadString(reader, "ManualPreparationDescription", ""),
+                ManualQualityControl = ReadString(reader, "ManualQualityControl", ""),
+                ManualFinalAssessment = ReadString(reader, "ManualFinalAssessment", ""),
+                ManualNotes = ReadString(reader, "ManualNotes", ""),
+                MixBeforeUse = ReadBoolean(reader, "MixBeforeUse"),
+                Status = ReadEnum(reader, "Status", FormStatus.Imported),
+                IngredientsLoaded = true
+            };
+
+            LoadIngredients(connection, form);
+            forms.Add(form);
+        }
+
+        return forms;
+    }
+
     private SqliteConnection OpenConnection()
     {
+        Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
         var connection = new SqliteConnection($"Data Source={_databasePath}");
         connection.Open();
         return connection;
+    }
+
+    private static string GetDefaultDatabasePath()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        return Path.Combine(appData, "PharmaExt", "pharmaext.sqlite");
     }
 
     private static void Execute(SqliteConnection connection, SqliteTransaction transaction, string sql, params (string Name, object? Value)[] parameters)
@@ -293,5 +470,116 @@ public sealed class LocalDatabaseService
         using var command = connection.CreateCommand();
         command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
         command.ExecuteNonQuery();
+    }
+
+    private static string ReadString(SqliteDataReader reader, string name, string fallback)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return fallback;
+        }
+
+        var value = Convert.ToString(reader.GetValue(ordinal));
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private static TEnum ReadEnum<TEnum>(SqliteDataReader reader, string name, TEnum fallback)
+        where TEnum : struct
+    {
+        var value = ReadString(reader, name, "");
+        return Enum.TryParse<TEnum>(value, out var parsedValue) ? parsedValue : fallback;
+    }
+
+    private static decimal ReadDecimal(SqliteDataReader reader, string name, decimal fallback)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return fallback;
+        }
+
+        return decimal.TryParse(Convert.ToString(reader.GetValue(ordinal)), out var value) ? value : fallback;
+    }
+
+    private static int ReadInt32(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? 0 : Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
+    private static bool ReadBoolean(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return !reader.IsDBNull(ordinal) && Convert.ToInt32(reader.GetValue(ordinal)) != 0;
+    }
+
+    private static DateTime ReadDateTime(SqliteDataReader reader, string name, DateTime fallback)
+    {
+        var value = ReadString(reader, name, "");
+        return DateTime.TryParse(value, out var parsedValue) ? parsedValue : fallback;
+    }
+
+    private static DateTime? ReadNullableDateTime(SqliteDataReader reader, string name)
+    {
+        var value = ReadString(reader, name, "");
+        return DateTime.TryParse(value, out var parsedValue) ? parsedValue : null;
+    }
+
+    private static decimal ReadNullableDecimalAsZero(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        return Convert.ToDecimal(reader.GetValue(ordinal));
+    }
+
+    private static decimal? ReadNullableDecimal(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : Convert.ToDecimal(reader.GetValue(ordinal));
+    }
+
+    private static void LoadIngredients(SqliteConnection connection, ImportedForm form)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                Id,
+                ImportedFormId,
+                Lp,
+                Name,
+                PrescribedQuantity,
+                Unit,
+                UsedQuantity,
+                BatchNumber,
+                ExpiryDate,
+                ManufacturerSupplier
+            FROM ImportedFormIngredients
+            WHERE ImportedFormId = $formId
+            ORDER BY Lp, Id;
+            """;
+        command.Parameters.AddWithValue("$formId", form.Id);
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            form.Ingredients.Add(new ImportedFormIngredient
+            {
+                Id = ReadInt32(reader, "Id"),
+                ImportedFormId = ReadInt32(reader, "ImportedFormId"),
+                Lp = ReadInt32(reader, "Lp"),
+                Name = ReadString(reader, "Name", ""),
+                PrescribedQuantity = ReadNullableDecimalAsZero(reader, "PrescribedQuantity"),
+                Unit = ReadString(reader, "Unit", ""),
+                UsedQuantity = ReadNullableDecimal(reader, "UsedQuantity"),
+                BatchNumber = ReadString(reader, "BatchNumber", ""),
+                ExpiryDate = ReadNullableDateTime(reader, "ExpiryDate"),
+                ManufacturerSupplier = ReadString(reader, "ManufacturerSupplier", "")
+            });
+        }
     }
 }

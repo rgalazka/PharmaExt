@@ -139,6 +139,18 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
         LoadIngredients(connection, form);
     }
 
+    public void LoadIngredients(IReadOnlyList<ImportedForm> forms)
+    {
+        using var connection = CreateConnection();
+        connection.Open();
+
+        foreach (var form in forms.Where(form => !form.IngredientsLoaded))
+        {
+            LoadIngredients(connection, form);
+            form.IngredientsLoaded = true;
+        }
+    }
+
     public void TestConnection()
     {
         using var connection = CreateConnection();
@@ -147,20 +159,45 @@ public sealed class FirebirdPrescriptionReader : IFirebirdPrescriptionReader
 
     private FbConnection CreateConnection()
     {
+        var charset = CleanConnectionValue(_settings.Firebird.Charset);
         var builder = new FbConnectionStringBuilder
         {
-            DataSource = _settings.Firebird.Host,
-            Database = _settings.Firebird.DatabasePath,
-            UserID = _settings.Firebird.User,
-            Password = _settings.Firebird.Password
+            DataSource = CleanConnectionValue(_settings.Firebird.Host),
+            Database = CleanConnectionValue(_settings.Firebird.DatabasePath),
+            UserID = CleanConnectionValue(_settings.Firebird.User),
+            Password = CleanConnectionValue(_settings.Firebird.Password)
         };
 
-        if (!string.Equals(_settings.Firebird.Charset, "DOMYSLNE", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(charset) && !string.Equals(charset, "DOMYSLNE", StringComparison.OrdinalIgnoreCase))
         {
-            builder.Charset = _settings.Firebird.Charset;
+            builder.Charset = charset;
         }
 
         return new FbConnection(builder.ConnectionString);
+    }
+
+    private static string CleanConnectionValue(string value)
+    {
+        var normalizedValue = value
+            .Replace("\u200E", "")
+            .Replace("\u200F", "")
+            .Replace("\u202A", "")
+            .Replace("\u202B", "")
+            .Replace("\u202C", "")
+            .Replace("\u202D", "")
+            .Replace("\u202E", "")
+            .Trim();
+
+        var builder = new StringBuilder(normalizedValue.Length);
+        foreach (var character in normalizedValue)
+        {
+            if (!char.IsControl(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private void LoadIngredients(FbConnection connection, ImportedForm form)
