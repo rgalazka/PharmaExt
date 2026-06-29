@@ -1,6 +1,5 @@
 using PharmaExt.App.Models;
 using QuestPDF.Fluent;
-using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
 namespace PharmaExt.App.Pdf;
@@ -22,22 +21,34 @@ public sealed class LabelPdfComponent : IComponent
 
     public void Compose(IContainer container)
     {
-        const float headerHeightMm = 8;
-        const float pharmacyHeightMm = 9;
-        const float notesHeightMm = 8;
-        const float mixBeforeUseHeightMm = 5;
+        var isCompact = _tableHeightMm <= 55;
+        var headerHeightMm = isCompact ? 6f : 8f;
+        var pharmacyHeightMm = isCompact ? 7f : 9f;
+        var notesHeightMm = isCompact ? 5f : 8f;
+        var mixBeforeUseHeightMm = isCompact ? 3.5f : 5f;
+        var headerTypeFontSize = isCompact ? 9f : 13f;
+        var headerNumberFontSize = isCompact ? 8f : 11f;
+        var pharmacyFontSize = isCompact ? 5.5f : 8f;
+        var patientLabelFontSize = isCompact ? 4.8f : 6f;
+        var patientNameFontSize = isCompact ? 6f : 8f;
+        var rowLabelFontSize = isCompact ? 4.3f : 5f;
+        var rowValueFontSize = isCompact ? 5.5f : 8f;
+        var rpFontSize = isCompact ? 8f : 10f;
+        var ingredientFontSize = isCompact ? 5f : 6.5f;
+        var notesLabelFontSize = isCompact ? 4.6f : 6f;
+        var notesTextFontSize = isCompact ? 5.2f : 7f;
+        var leftColumnPaddingMm = isCompact ? 0.4f : 2f;
         const float leftColumnWeight = 0.95f;
         const float rightColumnWeight = 1.05f;
         var detailsHeightMm = _tableHeightMm - headerHeightMm - pharmacyHeightMm;
         var prescriptionHeightMm = detailsHeightMm - notesHeightMm;
         var ingredientsHeightMm = _form.MixBeforeUse ? prescriptionHeightMm - mixBeforeUseHeightMm : prescriptionHeightMm;
-        var rowScale = detailsHeightMm / 38f;
-        var doctorHeightMm = 6f * rowScale;
-        var preparedByHeightMm = 6.5f * rowScale;
-        var preparationDateHeightMm = 6f * rowScale;
-        var expiryHeightMm = 6f * rowScale;
-        var dosageHeightMm = 6f * rowScale;
-        var storageHeightMm = 7.5f * rowScale;
+        var doctorHeightMm = isCompact ? 5f : 6f * detailsHeightMm / 38f;
+        var preparedByHeightMm = isCompact ? 5.5f : 6.5f * detailsHeightMm / 38f;
+        var preparationDateHeightMm = isCompact ? 4.5f : 6f * detailsHeightMm / 38f;
+        var expiryHeightMm = isCompact ? 4.5f : 6f * detailsHeightMm / 38f;
+        var dosageHeightMm = isCompact ? 5f : 6f * detailsHeightMm / 38f;
+        var storageHeightMm = detailsHeightMm - doctorHeightMm - preparedByHeightMm - preparationDateHeightMm - expiryHeightMm - dosageHeightMm;
 
         container
             .Width(_tableWidthMm, Unit.Millimetre)
@@ -48,17 +59,30 @@ public sealed class LabelPdfComponent : IComponent
             {
                 column.Item().BorderBottom(1).Height(headerHeightMm, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(13);
-                    row.RelativeItem().AlignCenter().AlignMiddle().Text($"Nr recepty: {_form.PrescriptionNumber}").Bold().FontSize(11);
+                    row.RelativeItem().AlignCenter().AlignMiddle().Text(LabelTypeText()).Bold().FontSize(headerTypeFontSize);
+                    row.RelativeItem().AlignCenter().AlignMiddle().Text($"Nr recepty: {_form.PrescriptionNumber}").Bold().FontSize(headerNumberFontSize);
                 });
 
                 column.Item().BorderBottom(1).Height(pharmacyHeightMm, Unit.Millimetre).Row(row =>
                 {
-                    row.RelativeItem(leftColumnWeight).BorderRight(1).AlignCenter().AlignMiddle().Text($"{_pharmacy.PharmacyName}\n{_pharmacy.PharmacyAddress}").Bold().FontSize(8).AlignCenter();
-                    row.RelativeItem(rightColumnWeight).PaddingLeft(2).Text(text =>
+                    row.RelativeItem(leftColumnWeight)
+                        .BorderRight(1)
+                        .AlignCenter()
+                        .AlignMiddle()
+                        .Text($"{_pharmacy.PharmacyName}\n{_pharmacy.PharmacyAddress}")
+                        .Bold()
+                        .FontSize(pharmacyFontSize)
+                        .AlignCenter();
+
+                    row.RelativeItem(rightColumnWeight).PaddingLeft(2).Column(patient =>
                     {
-                        text.Span("Imię i Nazwisko Pacjenta\n");
-                        text.Span(_form.PatientName).Bold().FontSize(8);
+                        patient.Item().Text("Imi\u0119 i Nazwisko Pacjenta").FontSize(patientLabelFontSize);
+                        patient.Item()
+                            .PaddingTop(isCompact ? 0.6f : 1.2f, Unit.Millimetre)
+                            .AlignCenter()
+                            .Text(_form.PatientName)
+                            .Bold()
+                            .FontSize(patientNameFontSize);
                     });
                 });
 
@@ -66,12 +90,12 @@ public sealed class LabelPdfComponent : IComponent
                 {
                     row.RelativeItem(leftColumnWeight).BorderRight(1).Column(left =>
                     {
-                        LabelRow(left, "Imię i Nazwisko Lekarza", _form.DoctorName, doctorHeightMm, false);
-                        LabelRow(left, "Imię i Nazwisko osoby sporządzającej lek", _form.PreparedByName, preparedByHeightMm);
-                        LabelRow(left, "Data sporządzenia", _form.PreparationDate.ToString("dd.MM.yyyy"), preparationDateHeightMm);
-                        LabelRow(left, "Termin ważności", _form.ExpiryTermText, expiryHeightMm);
-                        LabelRow(left, "Dawkowanie", _form.Dosage, dosageHeightMm);
-                        LabelRow(left, "Warunki przechowywania", _form.StorageConditions, storageHeightMm);
+                        LabelRow(left, "Imi\u0119 i Nazwisko Lekarza", _form.DoctorName, doctorHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm, false);
+                        LabelRow(left, "Imi\u0119 i Nazwisko osoby sporz\u0105dzaj\u0105cej lek", _form.PreparedByName, preparedByHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm);
+                        LabelRow(left, "Data sporz\u0105dzenia", _form.PreparationDate.ToString("dd.MM.yyyy"), preparationDateHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm);
+                        LabelRow(left, "Termin wa\u017cno\u015bci", _form.ExpiryTermText, expiryHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm);
+                        LabelRow(left, "Dawkowanie", _form.Dosage, dosageHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm);
+                        LabelRow(left, "Warunki przechowywania", _form.StorageConditions, storageHeightMm, rowLabelFontSize, rowValueFontSize, leftColumnPaddingMm);
                     });
 
                     row.RelativeItem(rightColumnWeight).Column(right =>
@@ -80,39 +104,39 @@ public sealed class LabelPdfComponent : IComponent
                         {
                             prescription.Item().Height(ingredientsHeightMm, Unit.Millimetre).Column(prescriptionContent =>
                             {
-                                prescriptionContent.Item().PaddingLeft(2).PaddingTop(1).Text("Rp.").Bold().FontSize(10);
-                                prescriptionContent.Item().PaddingLeft(4).PaddingRight(6).PaddingTop(5, Unit.Millimetre).Column(ingredients =>
+                                prescriptionContent.Item().PaddingLeft(2).PaddingTop(1).Text("Rp.").Bold().FontSize(rpFontSize);
+                                prescriptionContent.Item().PaddingLeft(4).PaddingRight(6).PaddingTop(isCompact ? 2.2f : 5f, Unit.Millimetre).Column(ingredients =>
                                 {
                                     foreach (var ingredient in _form.Ingredients.Where(ShouldPrintOnLabel))
                                     {
                                         ingredients.Item().Row(ingredientRow =>
                                         {
-                                            ingredientRow.RelativeItem().Text(ingredient.Name).Italic().Bold().FontSize(6.5f);
-                                            ingredientRow.ConstantItem(28, Unit.Millimetre).AlignRight().Text(FormatLabelQuantity(ingredient)).Italic().Bold().FontSize(6.5f);
+                                            ingredientRow.RelativeItem().Text(ingredient.Name).Italic().Bold().FontSize(ingredientFontSize);
+                                            ingredientRow.ConstantItem(28, Unit.Millimetre).AlignRight().Text(FormatLabelQuantity(ingredient)).Italic().Bold().FontSize(ingredientFontSize);
                                         });
                                     }
 
-                                    ingredients.Item().Text(FormatMfLine(_form.LabelMedicineForm)).Italic().Bold().FontSize(6.5f);
+                                    ingredients.Item().Text(FormatMfLine(_form.LabelMedicineForm)).Italic().Bold().FontSize(ingredientFontSize);
                                 });
                             });
 
                             if (_form.MixBeforeUse)
                             {
-                                prescription.Item().Height(mixBeforeUseHeightMm, Unit.Millimetre).AlignCenter().AlignMiddle().Text("ZMIESZAĆ PRZED UŻYCIEM").Bold().FontSize(8);
+                                prescription.Item().Height(mixBeforeUseHeightMm, Unit.Millimetre).AlignCenter().AlignMiddle().Text("ZMIESZA\u0106 PRZED U\u017bYCIEM").Bold().FontSize(isCompact ? 5.5f : 8f);
                             }
                         });
 
                         right.Item().BorderTop(1).Height(notesHeightMm, Unit.Millimetre).Row(notes =>
                         {
-                            notes.RelativeItem().PaddingLeft(2).Text("Uwagi").FontSize(6);
-                            notes.RelativeItem().AlignCenter().AlignMiddle().Text(_form.ManualNotes).Bold().FontSize(7);
+                            notes.RelativeItem().PaddingLeft(2).Text("Uwagi").FontSize(notesLabelFontSize);
+                            notes.RelativeItem().AlignCenter().AlignMiddle().Text(_form.ManualNotes).Bold().FontSize(notesTextFontSize);
                         });
                     });
                 });
             });
     }
 
-    private static void LabelRow(ColumnDescriptor column, string label, string value, float heightMm, bool drawTopBorder = true)
+    private static void LabelRow(ColumnDescriptor column, string label, string value, float heightMm, float labelFontSize, float valueFontSize, float horizontalPaddingMm, bool drawTopBorder = true)
     {
         var item = column.Item().Height(heightMm, Unit.Millimetre);
         if (drawTopBorder)
@@ -120,10 +144,10 @@ public sealed class LabelPdfComponent : IComponent
             item = item.BorderTop(1);
         }
 
-        item.PaddingHorizontal(2).Column(inner =>
+        item.PaddingHorizontal(horizontalPaddingMm, Unit.Millimetre).Column(inner =>
         {
-            inner.Item().Text(label).FontSize(5);
-            inner.Item().AlignCenter().Text(value).Bold().FontSize(8);
+            inner.Item().Text(label).FontSize(labelFontSize);
+            inner.Item().AlignCenter().Text(value).Bold().FontSize(valueFontSize);
         });
     }
 
@@ -144,5 +168,7 @@ public sealed class LabelPdfComponent : IComponent
         return string.IsNullOrWhiteSpace(value) ? "M.f." : $"M.f. {value.Trim()}";
     }
 
-    private string LabelTypeText() => _form.LabelType == LabelType.Zewnetrznie ? "Z E W N Ę T R Z N I E" : "W E W N Ę T R Z N I E";
+    private string LabelTypeText() => _form.LabelType == LabelType.Zewnetrznie
+        ? "Z E W N \u0118 T R Z N I E"
+        : "W E W N \u0118 T R Z N I E";
 }

@@ -9,3 +9,4 @@ obj/
 *.sqlite3
 output/
 tmp_numbers_preview/
+publish/

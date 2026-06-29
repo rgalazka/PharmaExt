@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using PharmaExt.App.ViewModels;
@@ -28,5 +29,26 @@ public partial class MainWindow : Window
         {
             viewModel.SetSelectedImportedForms(dataGrid.SelectedItems.OfType<Models.ImportedForm>());
         }
+    }
+
+    private void QualityDocumentTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (DataContext is MainViewModel viewModel && e.NewValue is QualityDocumentTreeItem item)
+        {
+            viewModel.SelectedQualityTreeItem = item;
+            NavigateQualityPreview(viewModel);
+        }
+    }
+
+    private void NavigateQualityPreview(MainViewModel viewModel)
+    {
+        var previewPath = viewModel.EnsureSelectedQualityPreviewPath();
+        if (string.IsNullOrWhiteSpace(previewPath) || !File.Exists(previewPath))
+        {
+            QualityPreviewBrowser.NavigateToString("<html><body style='font-family: Arial; margin: 16px;'>Brak podgladu dokumentu.</body></html>");
+            return;
+        }
+
+        QualityPreviewBrowser.Navigate(new Uri(Path.GetFullPath(previewPath)));
     }
 }

@@ -94,6 +94,24 @@ public sealed class LocalDatabaseService
                 ImportedFormId INTEGER NULL,
                 FOREIGN KEY (ImportedFormId) REFERENCES ImportedForms(Id) ON DELETE SET NULL
             );
+
+            CREATE TABLE IF NOT EXISTS QualityDocuments (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Code TEXT NOT NULL UNIQUE,
+                CategoryCode TEXT NOT NULL,
+                CategoryName TEXT NOT NULL,
+                Title TEXT NOT NULL,
+                Version TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                FilePath TEXT NOT NULL,
+                ContentText TEXT NOT NULL DEFAULT '',
+                PreviewHtmlPath TEXT NOT NULL DEFAULT '',
+                IssueDate TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.0000000',
+                EffectiveDate TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.0000000',
+                ImportedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL,
+                ExpiredAt TEXT NULL
+            );
             """;
         command.ExecuteNonQuery();
         AddColumnIfMissing(connection, "AppSettings", "FirebirdCharset", "TEXT NOT NULL DEFAULT 'WIN1250'");
@@ -104,6 +122,10 @@ public sealed class LocalDatabaseService
         AddColumnIfMissing(connection, "ImportedForms", "SaleDate", "TEXT NULL");
         AddColumnIfMissing(connection, "ImportedForms", "LabelMedicineForm", "TEXT NOT NULL DEFAULT 'Solutio'");
         AddColumnIfMissing(connection, "ImportedForms", "MixBeforeUse", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing(connection, "QualityDocuments", "ContentText", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "QualityDocuments", "PreviewHtmlPath", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "QualityDocuments", "IssueDate", "TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.0000000'");
+        AddColumnIfMissing(connection, "QualityDocuments", "EffectiveDate", "TEXT NOT NULL DEFAULT '2026-06-01T00:00:00.0000000'");
     }
 
     public void SaveSettings(AppSettings settings)
@@ -333,6 +355,51 @@ public sealed class LocalDatabaseService
         transaction.Commit();
     }
 
+    public int ResetLocalData(DateTime dateFrom, DateTime dateTo)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var dateFromValue = dateFrom.Date.ToString("O");
+        var dateToValue = dateTo.Date.AddDays(1).ToString("O");
+        var deletedFormsCount = CountFormsInDateRange(connection, transaction, dateFromValue, dateToValue);
+
+        Execute(connection, transaction, """
+            DELETE FROM ImportedFormIngredients
+            WHERE ImportedFormId IN (
+                SELECT Id
+                FROM ImportedForms
+                WHERE PreparationDate >= $dateFrom
+                  AND PreparationDate < $dateTo
+            );
+            """,
+            ("$dateFrom", dateFromValue),
+            ("$dateTo", dateToValue));
+
+        Execute(connection, transaction, """
+            DELETE FROM GeneratedDocuments
+            WHERE ImportedFormId IN (
+                SELECT Id
+                FROM ImportedForms
+                WHERE PreparationDate >= $dateFrom
+                  AND PreparationDate < $dateTo
+            );
+            """,
+            ("$dateFrom", dateFromValue),
+            ("$dateTo", dateToValue));
+
+        Execute(connection, transaction, """
+            DELETE FROM ImportedForms
+            WHERE PreparationDate >= $dateFrom
+              AND PreparationDate < $dateTo;
+            """,
+            ("$dateFrom", dateFromValue),
+            ("$dateTo", dateToValue));
+
+        transaction.Commit();
+        return deletedFormsCount;
+    }
+
     public IReadOnlyList<ImportedForm> SearchImportedForms(DateTime? dateFrom, DateTime? dateTo, string searchText)
     {
         using var connection = OpenConnection();
@@ -427,18 +494,255 @@ public sealed class LocalDatabaseService
         return forms;
     }
 
+    public IReadOnlyList<QualityDocument> LoadQualityDocuments()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                Id,
+                Code,
+                CategoryCode,
+                CategoryName,
+                Title,
+                Version,
+                Status,
+                FilePath,
+                ContentText,
+                PreviewHtmlPath,
+                IssueDate,
+                EffectiveDate,
+                ImportedAt,
+                UpdatedAt,
+                ExpiredAt
+            FROM QualityDocuments
+            ORDER BY CategoryCode, Code;
+            """;
+
+        var documents = new List<QualityDocument>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            documents.Add(ReadQualityDocument(reader));
+        }
+
+        return documents;
+    }
+
+    public void UpsertQualityDocument(QualityDocument document)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var now = DateTime.Now.ToString("O");
+        var importedAt = document.ImportedAt == default ? DateTime.Now.ToString("O") : document.ImportedAt.ToString("O");
+
+        Execute(connection, transaction, """
+            INSERT INTO QualityDocuments (
+                Code, CategoryCode, CategoryName, Title, Version, Status, FilePath, ContentText, PreviewHtmlPath,
+                IssueDate, EffectiveDate, ImportedAt, UpdatedAt, ExpiredAt
+            )
+            VALUES (
+                $code, $categoryCode, $categoryName, $title, $version, $status, $filePath, $contentText, $previewHtmlPath,
+                $issueDate, $effectiveDate, $importedAt, $now, $expiredAt
+            )
+            ON CONFLICT(Code) DO UPDATE SET
+                CategoryCode = excluded.CategoryCode,
+                CategoryName = excluded.CategoryName,
+                Title = excluded.Title,
+                FilePath = excluded.FilePath,
+                ContentText = excluded.ContentText,
+                PreviewHtmlPath = excluded.PreviewHtmlPath,
+                IssueDate = excluded.IssueDate,
+                EffectiveDate = excluded.EffectiveDate,
+                UpdatedAt = excluded.UpdatedAt;
+            """,
+            ("$code", document.Code),
+            ("$categoryCode", document.CategoryCode),
+            ("$categoryName", document.CategoryName),
+            ("$title", document.Title),
+            ("$version", document.Version),
+            ("$status", document.Status),
+            ("$filePath", document.FilePath),
+            ("$contentText", document.ContentText),
+            ("$previewHtmlPath", document.PreviewHtmlPath),
+            ("$issueDate", document.IssueDate.ToString("O")),
+            ("$effectiveDate", document.EffectiveDate.ToString("O")),
+            ("$importedAt", importedAt),
+            ("$now", now),
+            ("$expiredAt", document.ExpiredAt?.ToString("O")));
+
+        transaction.Commit();
+    }
+
+    public void UpdateQualityDocumentVersion(QualityDocument document)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        Execute(connection, transaction, """
+            UPDATE QualityDocuments
+            SET Title = $title,
+                Version = $version,
+                Status = $status,
+                FilePath = $filePath,
+                ContentText = $contentText,
+                PreviewHtmlPath = $previewHtmlPath,
+                IssueDate = $issueDate,
+                EffectiveDate = $effectiveDate,
+                UpdatedAt = $updatedAt,
+                ExpiredAt = NULL
+            WHERE Id = $id;
+            """,
+            ("$id", document.Id),
+            ("$title", document.Title),
+            ("$version", document.Version),
+            ("$status", document.Status),
+            ("$filePath", document.FilePath),
+            ("$contentText", document.ContentText),
+            ("$previewHtmlPath", document.PreviewHtmlPath),
+            ("$issueDate", document.IssueDate.ToString("O")),
+            ("$effectiveDate", document.EffectiveDate.ToString("O")),
+            ("$updatedAt", DateTime.Now.ToString("O")));
+
+        transaction.Commit();
+    }
+
+    public void SaveQualityDocumentMetadata(QualityDocument document)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        Execute(connection, transaction, """
+            UPDATE QualityDocuments
+            SET Title = $title,
+                IssueDate = $issueDate,
+                EffectiveDate = $effectiveDate,
+                UpdatedAt = $updatedAt
+            WHERE Id = $id;
+            """,
+            ("$id", document.Id),
+            ("$title", document.Title),
+            ("$issueDate", document.IssueDate.ToString("O")),
+            ("$effectiveDate", document.EffectiveDate.ToString("O")),
+            ("$updatedAt", DateTime.Now.ToString("O")));
+
+        transaction.Commit();
+    }
+
+    public void SaveQualityDocumentPaths(QualityDocument document)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        Execute(connection, transaction, """
+            UPDATE QualityDocuments
+            SET FilePath = $filePath,
+                PreviewHtmlPath = $previewHtmlPath,
+                UpdatedAt = $updatedAt
+            WHERE Id = $id;
+            """,
+            ("$id", document.Id),
+            ("$filePath", document.FilePath),
+            ("$previewHtmlPath", document.PreviewHtmlPath),
+            ("$updatedAt", DateTime.Now.ToString("O")));
+
+        transaction.Commit();
+    }
+
+    public void ExpireQualityDocument(int id)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        Execute(connection, transaction, """
+            UPDATE QualityDocuments
+            SET Status = 'Wygaszony',
+                ExpiredAt = $expiredAt,
+                UpdatedAt = $expiredAt
+            WHERE Id = $id;
+            """,
+            ("$id", id),
+            ("$expiredAt", DateTime.Now.ToString("O")));
+
+        transaction.Commit();
+    }
+
     private SqliteConnection OpenConnection()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
-        var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var connection = new SqliteConnection($"Data Source={_databasePath};Pooling=False");
         connection.Open();
         return connection;
     }
 
-    private static string GetDefaultDatabasePath()
+    public static string GetDefaultDatabasePath()
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(appData, "PharmaExt", "pharmaext.sqlite");
+        return Path.Combine(GetDefaultDataDirectory(), "pharmaext.sqlite");
+    }
+
+    public static string GetDefaultDataDirectory()
+    {
+        var portableDirectory = Path.Combine(AppContext.BaseDirectory, "Data");
+        var appDataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PharmaExt");
+        Directory.CreateDirectory(portableDirectory);
+        MigrateAppDataToPortableDirectory(appDataDirectory, portableDirectory);
+        return portableDirectory;
+    }
+
+    public static void ClearConnectionPools()
+    {
+        SqliteConnection.ClearAllPools();
+    }
+
+    private static void MigrateAppDataToPortableDirectory(string appDataDirectory, string portableDirectory)
+    {
+        try
+        {
+            var oldDatabasePath = Path.Combine(appDataDirectory, "pharmaext.sqlite");
+            var newDatabasePath = Path.Combine(portableDirectory, "pharmaext.sqlite");
+            if (File.Exists(oldDatabasePath) && !File.Exists(newDatabasePath))
+            {
+                File.Copy(oldDatabasePath, newDatabasePath, overwrite: false);
+            }
+
+            CopyDirectoryIfMissing(Path.Combine(appDataDirectory, "QualityDocuments"), Path.Combine(portableDirectory, "QualityDocuments"));
+            CopyDirectoryIfMissing(Path.Combine(appDataDirectory, "QualityPreviews"), Path.Combine(portableDirectory, "QualityPreviews"));
+        }
+        catch
+        {
+            // Migracja jest pomocnicza; program moze dzialac na pustym katalogu Data.
+        }
+    }
+
+    private static void CopyDirectoryIfMissing(string sourceDirectory, string targetDirectory)
+    {
+        if (!Directory.Exists(sourceDirectory) || Directory.Exists(targetDirectory))
+        {
+            return;
+        }
+
+        foreach (var sourceFile in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, sourceFile);
+            var targetFile = Path.Combine(targetDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+            File.Copy(sourceFile, targetFile, overwrite: false);
+        }
+    }
+
+    public void CreateDatabaseBackup(string targetPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        if (File.Exists(targetPath))
+        {
+            File.Delete(targetPath);
+        }
+
+        using var sourceConnection = OpenConnection();
+        using var targetConnection = new SqliteConnection($"Data Source={targetPath};Pooling=False");
+        targetConnection.Open();
+        sourceConnection.BackupDatabase(targetConnection);
+        ClearConnectionPools();
     }
 
     private static void Execute(SqliteConnection connection, SqliteTransaction transaction, string sql, params (string Name, object? Value)[] parameters)
@@ -452,6 +756,21 @@ public sealed class LocalDatabaseService
         }
 
         command.ExecuteNonQuery();
+    }
+
+    private static int CountFormsInDateRange(SqliteConnection connection, SqliteTransaction transaction, string dateFrom, string dateTo)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM ImportedForms
+            WHERE PreparationDate >= $dateFrom
+              AND PreparationDate < $dateTo;
+            """;
+        command.Parameters.AddWithValue("$dateFrom", dateFrom);
+        command.Parameters.AddWithValue("$dateTo", dateTo);
+        return Convert.ToInt32(command.ExecuteScalar());
     }
 
     private static void AddColumnIfMissing(SqliteConnection connection, string tableName, string columnName, string definition)
@@ -524,6 +843,28 @@ public sealed class LocalDatabaseService
     {
         var value = ReadString(reader, name, "");
         return DateTime.TryParse(value, out var parsedValue) ? parsedValue : null;
+    }
+
+    private static QualityDocument ReadQualityDocument(SqliteDataReader reader)
+    {
+        return new QualityDocument
+        {
+            Id = ReadInt32(reader, "Id"),
+            Code = ReadString(reader, "Code", ""),
+            CategoryCode = ReadString(reader, "CategoryCode", ""),
+            CategoryName = ReadString(reader, "CategoryName", ""),
+            Title = ReadString(reader, "Title", ""),
+            Version = ReadString(reader, "Version", "1.0"),
+            Status = ReadString(reader, "Status", "Obowiazujacy"),
+            FilePath = ReadString(reader, "FilePath", ""),
+            ContentText = ReadString(reader, "ContentText", ""),
+            PreviewHtmlPath = ReadString(reader, "PreviewHtmlPath", ""),
+            IssueDate = ReadDateTime(reader, "IssueDate", new DateTime(2026, 6, 1)),
+            EffectiveDate = ReadDateTime(reader, "EffectiveDate", new DateTime(2026, 6, 1)),
+            ImportedAt = ReadDateTime(reader, "ImportedAt", DateTime.Now),
+            UpdatedAt = ReadDateTime(reader, "UpdatedAt", DateTime.Now),
+            ExpiredAt = ReadNullableDateTime(reader, "ExpiredAt")
+        };
     }
 
     private static decimal ReadNullableDecimalAsZero(SqliteDataReader reader, string name)

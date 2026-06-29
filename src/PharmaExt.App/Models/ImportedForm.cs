@@ -11,6 +11,7 @@ public sealed class ImportedForm : INotifyPropertyChanged
     private LabelType _labelType = LabelType.Zewnetrznie;
     private LabelSize _labelSize = LabelSize.Duza;
     private string _labelMedicineForm = "Solutio";
+    private string _expiryTermText = "14 dni";
     private string _manualCalculations = "";
     private string _manualPreparationDescription = "";
     private string _manualQualityControl = "";
@@ -39,7 +40,6 @@ public sealed class ImportedForm : INotifyPropertyChanged
     public DateTime? AcceptanceDate { get; set; }
     public DateTime PreparationDate { get; set; } = DateTime.Today;
     public DateTime? SaleDate { get; set; }
-    public string ExpiryTermText { get; set; } = "14 dni";
     public string StorageConditions { get; set; } = "";
     public FormStatus Status { get; set; } = FormStatus.Imported;
     public bool IngredientsLoaded { get; set; }
@@ -73,6 +73,29 @@ public sealed class ImportedForm : INotifyPropertyChanged
     {
         get => _labelMedicineForm;
         set => SetEditableProperty(ref _labelMedicineForm, value);
+    }
+
+    public string ExpiryTermText
+    {
+        get => _expiryTermText;
+        set
+        {
+            if (EqualityComparer<string>.Default.Equals(_expiryTermText, value))
+            {
+                return;
+            }
+
+            _expiryTermText = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MedicineExpiryDate));
+            MarkEdited();
+        }
+    }
+
+    public DateTime? MedicineExpiryDate
+    {
+        get => TryParseDate(ExpiryTermText, out var date) ? date : null;
+        set => ExpiryTermText = value?.ToString("dd.MM.yyyy") ?? "";
     }
 
     public string ManualCalculations
@@ -199,5 +222,12 @@ public sealed class ImportedForm : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static bool TryParseDate(string value, out DateTime date)
+    {
+        var formats = new[] { "dd.MM.yyyy", "dd/MM/yyyy", "yyyy-MM-dd" };
+        return DateTime.TryParseExact(value, formats, null, System.Globalization.DateTimeStyles.None, out date)
+            || DateTime.TryParse(value, out date);
     }
 }

@@ -6,23 +6,26 @@ namespace PharmaExt.App.Pdf;
 
 public sealed class BrotherLabelPdfGenerator
 {
-    public void GenerateBrotherLabels(IReadOnlyList<ImportedForm> forms, PharmacySettings pharmacy, string filePath)
+    public void GenerateBrotherLabels(IReadOnlyList<ImportedForm> forms, PharmacySettings pharmacy, string filePath, LabelSize? labelSizeOverride = null)
     {
         Document.Create(document =>
         {
             foreach (var form in forms)
             {
-                var pageWidth = form.LabelSize == LabelSize.Duza ? 180 : 160;
-                var pageHeight = form.LabelSize == LabelSize.Duza ? 88 : 76;
-                var tableHeight = form.LabelSize == LabelSize.Duza ? 82 : 70;
+                var labelSize = labelSizeOverride ?? form.LabelSize;
+                var pageWidth = labelSize == LabelSize.Duza ? 180 : 140;
+                var pageHeight = labelSize == LabelSize.Duza ? 88 : 76;
+                var tableHeight = labelSize == LabelSize.Duza ? 80 : 50;
+                var topPadding = labelSize == LabelSize.Duza ? 0.5f : 3f;
 
                 document.Page(page =>
                 {
                     page.Size(pageWidth, pageHeight, Unit.Millimetre);
                     page.Margin(0);
                     page.Content()
+                        .PaddingTop(topPadding, Unit.Millimetre)
                         .AlignCenter()
-                        .AlignMiddle()
+                        .AlignTop()
                         .Component(new LabelPdfComponent(form, pharmacy, pageWidth, tableHeight));
                 });
             }
