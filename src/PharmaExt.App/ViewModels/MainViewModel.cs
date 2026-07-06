@@ -10,6 +10,7 @@ using System.Xml.Linq;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
 using Microsoft.Win32;
 using PharmaExt.App.Models;
 using PharmaExt.App.Pdf;
@@ -24,15 +25,29 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly ProtocolPdfGenerator _protocolPdfGenerator;
     private readonly BrotherLabelPdfGenerator _labelPdfGenerator;
     private readonly QualityDocumentPdfGenerator _qualityDocumentPdfGenerator;
+    private readonly SettlementReportPdfGenerator _settlementReportPdfGenerator;
+    private readonly SettlementInvoicePdfGenerator _settlementInvoicePdfGenerator;
+    private readonly InventoryPdfGenerator _inventoryPdfGenerator;
+    private bool _isLoadingCompositionGroups;
+    private IReadOnlyDictionary<string, string> _backgroundCompositionKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     private ImportedForm? _selectedForm;
     private QualityDocumentTreeItem? _selectedQualityTreeItem;
     private QualityDocument? _selectedQualityDocument;
     private QualityDocument? _selectedRecipeInstruction;
+    private InventoryItemRow? _selectedInventoryItem;
+    private SettlementReportRow? _selectedSettlementRow;
+    private AnalysisPrescriptionRow? _selectedAnalysisRow;
     private string _selectedRecipeInstructionText = "";
     private BatchEditFieldOption? _selectedBatchEditField;
     private string _batchEditValue = "";
     private string _qualityDocumentSearchText = "";
+    private string _recipeInstructionSearchText = "";
     private string _maxUsedQuantityDeviationPercentText = "";
+    private string _formsSummary = "";
+    private bool _showOnlyEditedForms;
+    private bool _showOnlyFormsWithoutInstruction;
+    private bool _showOnlyFormsWithoutPdf;
+    private bool _showOnlyCompositionGroups;
     private bool _isSearching;
 
     public MainViewModel()
@@ -46,13 +61,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
         _protocolPdfGenerator = new ProtocolPdfGenerator();
         _labelPdfGenerator = new BrotherLabelPdfGenerator();
         _qualityDocumentPdfGenerator = new QualityDocumentPdfGenerator();
+        _settlementReportPdfGenerator = new SettlementReportPdfGenerator();
+        _settlementInvoicePdfGenerator = new SettlementInvoicePdfGenerator();
+        _inventoryPdfGenerator = new InventoryPdfGenerator();
 
         SearchDateFrom = DateTime.Today.AddDays(-7);
         SearchDateTo = DateTime.Today;
+        SettlementDateFrom = SearchDateFrom;
+        SettlementDateTo = SearchDateTo;
+        AnalysisDateFrom = SearchDateFrom;
+        AnalysisDateTo = SearchDateTo;
         ResetLocalDateFrom = SearchDateFrom;
         ResetLocalDateTo = SearchDateTo;
 
         SearchCommand = new RelayCommand(Search, () => !IsSearching);
+        RefreshFirebirdRangeCommand = new RelayCommand(RefreshFirebirdRange, () => !IsSearching);
+        GenerateSettlementReportCommand = new RelayCommand(GenerateSettlementReport, () => !IsSearching);
+        GenerateSettlementReportPdfCommand = new RelayCommand(GenerateSettlementReportPdf, () => SettlementRows.Count > 0);
+        GenerateSelectedSettlementInvoiceCommand = new RelayCommand(GenerateSelectedSettlementInvoice, () => SettlementRows.Any(row => !row.MissingInvoiceNumber));
+        GenerateAllSettlementInvoicesCommand = new RelayCommand(GenerateAllSettlementInvoices, () => SettlementRows.Any(row => !row.MissingInvoiceNumber));
+        GenerateAnalysisCommand = new RelayCommand(GenerateAnalysis, () => !IsSearching);
+        LoadInventoryCommand = new RelayCommand(LoadInventory, () => !IsSearching);
+        GenerateInventoryPdfCommand = new RelayCommand(GenerateInventoryPdf, () => InventoryItems.Count > 0 && !IsSearching);
         SaveCommand = new RelayCommand(Save);
         TestFirebirdConnectionCommand = new RelayCommand(TestFirebirdConnection);
         GenerateProtocolPdfCommand = new RelayCommand(GenerateProtocolPdf, () => SelectedForm is not null);
@@ -64,26 +94,118 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ApplyBatchEditCommand = new RelayCommand(ApplyBatchEdit, CanApplyBatchEdit);
         CopyCheckedFieldsCommand = new RelayCommand(CopyCheckedFields, CanCopyCheckedFields);
         AcceptRecipeInstructionCommand = new RelayCommand(AcceptRecipeInstruction, CanAcceptRecipeInstruction);
+        AutoAcceptRecipeInstructionCommand = new RelayCommand(AutoAcceptRecipeInstruction, CanAutoAcceptRecipeInstruction);
         ImportQualityDocumentsCommand = new RelayCommand(ImportQualityDocuments);
         OpenQualityDocumentCommand = new RelayCommand(OpenQualityDocument, () => SelectedQualityDocument is not null);
         UpdateQualityDocumentCommand = new RelayCommand(UpdateQualityDocument, () => SelectedQualityDocument is not null);
         ExpireQualityDocumentCommand = new RelayCommand(ExpireQualityDocument, () => SelectedQualityDocument is not null && SelectedQualityDocument.Status != "Wygaszony");
         GenerateQualityDocumentPdfCommand = new RelayCommand(GenerateQualityDocumentPdf, () => SelectedQualityDocument is not null);
         SaveQualityDocumentMetadataCommand = new RelayCommand(SaveQualityDocumentMetadata, () => SelectedQualityDocument is not null);
+        CreateProgramBackupCommand = new RelayCommand(CreateProgramBackup);
         ExportProgramDataCommand = new RelayCommand(ExportProgramData);
         ImportProgramDataCommand = new RelayCommand(ImportProgramData);
         SelectedBatchEditField = BatchEditFields.FirstOrDefault();
+        CollectionViewSource.GetDefaultView(ImportedForms).Filter = FilterImportedForm;
+        UpdateFormsSummary();
         LoadQualityDocuments();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    public string AppVersion { get; } = "PharmaExt 0.9.2026-07-02";
     public AppSettings Settings { get; }
     public DateTime? SearchDateFrom { get; set; }
     public DateTime? SearchDateTo { get; set; }
+    public DateTime? SettlementDateFrom { get; set; }
+    public DateTime? SettlementDateTo { get; set; }
+    public string SettlementAddress { get; set; } = "";
+    public DateTime? AnalysisDateFrom { get; set; }
+    public DateTime? AnalysisDateTo { get; set; }
+    public string AnalysisAddress { get; set; } = "";
+    public string InventorySearchText { get; set; } = "";
+    public bool InventoryOnlyNonZero { get; set; }
     public DateTime? ResetLocalDateFrom { get; set; }
     public DateTime? ResetLocalDateTo { get; set; }
     public string SearchAddress { get; set; } = "";
+    public string FormsSummary
+    {
+        get => _formsSummary;
+        private set
+        {
+            if (_formsSummary == value)
+            {
+                return;
+            }
+
+            _formsSummary = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool ShowOnlyEditedForms
+    {
+        get => _showOnlyEditedForms;
+        set
+        {
+            if (_showOnlyEditedForms == value)
+            {
+                return;
+            }
+
+            _showOnlyEditedForms = value;
+            OnPropertyChanged();
+            RefreshFormsView();
+        }
+    }
+
+    public bool ShowOnlyFormsWithoutInstruction
+    {
+        get => _showOnlyFormsWithoutInstruction;
+        set
+        {
+            if (_showOnlyFormsWithoutInstruction == value)
+            {
+                return;
+            }
+
+            _showOnlyFormsWithoutInstruction = value;
+            OnPropertyChanged();
+            RefreshFormsView();
+        }
+    }
+
+    public bool ShowOnlyFormsWithoutPdf
+    {
+        get => _showOnlyFormsWithoutPdf;
+        set
+        {
+            if (_showOnlyFormsWithoutPdf == value)
+            {
+                return;
+            }
+
+            _showOnlyFormsWithoutPdf = value;
+            OnPropertyChanged();
+            RefreshFormsView();
+        }
+    }
+
+    public bool ShowOnlyCompositionGroups
+    {
+        get => _showOnlyCompositionGroups;
+        set
+        {
+            if (_showOnlyCompositionGroups == value)
+            {
+                return;
+            }
+
+            _showOnlyCompositionGroups = value;
+            OnPropertyChanged();
+            RefreshFormsView();
+        }
+    }
+
     public string MaxUsedQuantityDeviationPercentText
     {
         get => _maxUsedQuantityDeviationPercentText;
@@ -102,6 +224,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ImportedForm> FoundPrescriptions { get; } = new();
     public ObservableCollection<ImportedForm> ImportedForms { get; } = new();
     public ObservableCollection<ImportedForm> SelectedImportedForms { get; } = new();
+    public ObservableCollection<SettlementReportRow> SettlementRows { get; } = new();
+    public ObservableCollection<AnalysisPrescriptionRow> AnalysisRows { get; } = new();
+    public ObservableCollection<InventoryItemRow> InventoryItems { get; } = new();
+    public ObservableCollection<InventoryDeliveryRow> InventoryDeliveries { get; } = new();
     public ObservableCollection<QualityDocumentTreeItem> QualityDocumentTree { get; } = new();
     public ObservableCollection<QualityDocument> QualityDocuments { get; } = new();
     public ObservableCollection<QualityDocument> RecipeInstructions { get; } = new();
@@ -124,19 +250,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public LabelSize[] LabelSizes { get; } = Enum.GetValues<LabelSize>();
     public LabelMedicineFormOption[] LabelMedicineFormOptions { get; } =
     [
-        new("Unguentum", "maĹ›Ä‡"),
+        new("Unguentum", "maść"),
         new("Pasta", "pasta"),
         new("Cremor", "krem"),
-        new("Gelum", "ĹĽel"),
-        new("Solutio", "roztwĂłr"),
+        new("Gelum", "żel"),
+        new("Solutio", "roztwór"),
         new("Suspensio", "zawiesina"),
         new("Emulsio", "emulsja"),
         new("Pulvis", "proszek"),
-        new("Capsula", "kapsuĹ‚ka"),
+        new("Capsula", "kapsułka"),
         new("Suppositorium", "czopek"),
         new("Guttae", "krople"),
         new("Mixtura", "mieszanka"),
-        new("Linimentum", "mazidĹ‚o"),
+        new("Linimentum", "mazidło"),
         new("Suppositoria", "czopki"),
         new("Globuli vaginales", "globulki dopochwowe"),
         new("Pulveres (Pulv.)", "proszki"),
@@ -153,6 +279,23 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool CopyManualQualityControl { get; set; }
     public bool CopyDosage { get; set; }
     public bool CopyManualNotes { get; set; }
+    public decimal SettlementLimitTotal => SettlementRows.Sum(row => row.LimitAmount);
+    public decimal SettlementOverLimitTotal => SettlementRows.Sum(row => row.OverLimitAmount);
+    public decimal SettlementPaymentTotal => SettlementRows.Sum(row => row.PaymentAmount);
+    public decimal AnalysisTotalNet => AnalysisRows.Sum(row => row.TotalNet);
+    public decimal AnalysisTotalGross => AnalysisRows.Sum(row => row.TotalGross);
+    public decimal AnalysisPatientPaymentTotal => AnalysisRows.Sum(row => row.PatientPayment);
+    public decimal AnalysisIngredientsNetTotal => AnalysisRows.Sum(row => row.IngredientsNet);
+    public decimal AnalysisIngredientsGrossTotal => AnalysisRows.Sum(row => row.IngredientsGross);
+    public decimal AnalysisTaxAndMarginNetTotal => AnalysisRows.Sum(row => row.TaxAndMarginNet);
+    public decimal AnalysisTaxAndMarginGrossTotal => AnalysisRows.Sum(row => row.TaxAndMarginGross);
+    public decimal AnalysisPurchaseVatTotal => AnalysisRows.Sum(row => row.PurchaseVat);
+    public decimal AnalysisSalesVatTotal => AnalysisRows.Sum(row => row.SalesVat);
+    public decimal AnalysisVatDifferenceTotal => AnalysisPurchaseVatTotal - AnalysisSalesVatTotal;
+    public decimal AnalysisNetProfitTotal => AnalysisRows.Sum(row => row.NetProfit);
+    public decimal AnalysisProfitMinusVatTotal => AnalysisRows.Sum(row => row.ProfitMinusVat);
+    public Brush AnalysisVatDifferenceBrush => AnalysisPrescriptionRow.GetDifferenceBrush(AnalysisVatDifferenceTotal);
+    public Brush AnalysisProfitMinusVatBrush => AnalysisPrescriptionRow.GetProfitBrush(AnalysisProfitMinusVatTotal);
 
     public string QualityDocumentSearchText
     {
@@ -167,6 +310,22 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _qualityDocumentSearchText = value;
             OnPropertyChanged();
             BuildQualityDocumentTree();
+        }
+    }
+
+    public string RecipeInstructionSearchText
+    {
+        get => _recipeInstructionSearchText;
+        set
+        {
+            if (_recipeInstructionSearchText == value)
+            {
+                return;
+            }
+
+            _recipeInstructionSearchText = value;
+            OnPropertyChanged();
+            BuildRecipeInstructions();
         }
     }
 
@@ -204,6 +363,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _isSearching = value;
             OnPropertyChanged();
             (SearchCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (RefreshFirebirdRangeCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (GenerateSettlementReportCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (GenerateAnalysisCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (LoadInventoryCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (GenerateInventoryPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
     }
 
@@ -212,12 +376,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         get => _selectedForm;
         set
         {
+            if (!ReferenceEquals(_selectedForm, value))
+            {
+                SaveEditedFormSilently(_selectedForm);
+            }
+
             _selectedForm = value;
             LoadSelectedFormIngredients();
             OnPropertyChanged();
             (GenerateProtocolPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (CopyCheckedFieldsCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (AcceptRecipeInstructionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (AutoAcceptRecipeInstructionCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
     }
 
@@ -239,6 +409,38 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set
         {
             _selectedRecipeInstructionText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public InventoryItemRow? SelectedInventoryItem
+    {
+        get => _selectedInventoryItem;
+        set
+        {
+            _selectedInventoryItem = value;
+            OnPropertyChanged();
+            LoadSelectedInventoryDeliveries();
+        }
+    }
+
+    public SettlementReportRow? SelectedSettlementRow
+    {
+        get => _selectedSettlementRow;
+        set
+        {
+            _selectedSettlementRow = value;
+            OnPropertyChanged();
+            (GenerateSelectedSettlementInvoiceCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
+
+    public AnalysisPrescriptionRow? SelectedAnalysisRow
+    {
+        get => _selectedAnalysisRow;
+        set
+        {
+            _selectedAnalysisRow = value;
             OnPropertyChanged();
         }
     }
@@ -271,6 +473,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public ICommand SearchCommand { get; }
+    public ICommand RefreshFirebirdRangeCommand { get; }
+    public ICommand GenerateSettlementReportCommand { get; }
+    public ICommand GenerateSettlementReportPdfCommand { get; }
+    public ICommand GenerateSelectedSettlementInvoiceCommand { get; }
+    public ICommand GenerateAllSettlementInvoicesCommand { get; }
+    public ICommand GenerateAnalysisCommand { get; }
+    public ICommand LoadInventoryCommand { get; }
+    public ICommand GenerateInventoryPdfCommand { get; }
     public ICommand SaveCommand { get; }
     public ICommand TestFirebirdConnectionCommand { get; }
     public ICommand GenerateProtocolPdfCommand { get; }
@@ -282,12 +492,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand ApplyBatchEditCommand { get; }
     public ICommand CopyCheckedFieldsCommand { get; }
     public ICommand AcceptRecipeInstructionCommand { get; }
+    public ICommand AutoAcceptRecipeInstructionCommand { get; }
     public ICommand ImportQualityDocumentsCommand { get; }
     public ICommand OpenQualityDocumentCommand { get; }
     public ICommand UpdateQualityDocumentCommand { get; }
     public ICommand ExpireQualityDocumentCommand { get; }
     public ICommand GenerateQualityDocumentPdfCommand { get; }
     public ICommand SaveQualityDocumentMetadataCommand { get; }
+    public ICommand CreateProgramBackupCommand { get; }
     public ICommand ExportProgramDataCommand { get; }
     public ICommand ImportProgramDataCommand { get; }
 
@@ -302,6 +514,92 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedImportedForms));
         (ApplyBatchEditCommand as RelayCommand)?.RaiseCanExecuteChanged();
         (CopyCheckedFieldsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+    }
+
+    private bool FilterImportedForm(object item)
+    {
+        if (item is not ImportedForm form)
+        {
+            return false;
+        }
+
+        if (ShowOnlyEditedForms && !form.IsEditedThisSession)
+        {
+            return false;
+        }
+
+        if (ShowOnlyFormsWithoutInstruction && form.HasInstruction)
+        {
+            return false;
+        }
+
+        if (ShowOnlyFormsWithoutPdf && form.HasGeneratedPdf)
+        {
+            return false;
+        }
+
+        if (ShowOnlyCompositionGroups && string.IsNullOrWhiteSpace(form.CompositionGroupLabel))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void RefreshFormsView()
+    {
+        CollectionViewSource.GetDefaultView(ImportedForms).Refresh();
+        UpdateFormsSummary();
+    }
+
+    private void UpdateFormsSummary()
+    {
+        var total = ImportedForms.Count;
+        var edited = ImportedForms.Count(form => form.IsEditedThisSession);
+        var withoutInstruction = ImportedForms.Count(form => !form.HasInstruction);
+        var withoutPdf = ImportedForms.Count(form => !form.HasGeneratedPdf);
+        var grouped = ImportedForms.Count(form => !string.IsNullOrWhiteSpace(form.CompositionGroupLabel));
+        FormsSummary = $"Recepty: {total} | edytowane: {edited} | bez IR: {withoutInstruction} | bez PDF: {withoutPdf} | podobny skład: {grouped}";
+    }
+
+    private void RegisterFormForUiUpdates(ImportedForm form)
+    {
+        form.PropertyChanged -= ImportedForm_PropertyChanged;
+        form.PropertyChanged += ImportedForm_PropertyChanged;
+    }
+
+    private void ImportedForm_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ImportedForm.IsEditedThisSession)
+            or nameof(ImportedForm.HasInstruction)
+            or nameof(ImportedForm.HasGeneratedPdf)
+            or nameof(ImportedForm.CompositionGroupLabel))
+        {
+            RefreshFormsView();
+        }
+    }
+
+    private void SaveEditedFormSilently(ImportedForm? form)
+    {
+        if (form is null || !form.IsEditedThisSession)
+        {
+            return;
+        }
+
+        try
+        {
+            _localDatabase.UpsertImportedForm(form);
+            form.EnableEditTracking();
+            RefreshFormsView();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie automatycznie zapisac recepty {form.PrescriptionNumber}.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 
     public string EnsureSelectedQualityPreviewPath()
@@ -355,7 +653,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         RecipeInstructions.Clear();
         foreach (var document in QualityDocuments
             .Where(document => string.Equals(document.CategoryCode, "IR", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(document.Status, "Wygaszony", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(document.Status, "Wygaszony", StringComparison.OrdinalIgnoreCase)
+                && MatchesRecipeInstructionSearch(document))
             .OrderBy(document => document.Code))
         {
             RecipeInstructions.Add(document);
@@ -365,6 +664,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             SelectedRecipeInstruction = null;
         }
+    }
+
+    private bool MatchesRecipeInstructionSearch(QualityDocument document)
+    {
+        return RecipeInstructionSearchService.Matches(document, RecipeInstructionSearchText);
     }
 
     private void BuildQualityDocumentTree()
@@ -460,13 +764,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     return localResults;
                 }
 
-                var firebirdResults = reader.Search(searchDateFrom, searchDateTo, searchAddress);
-                if (reader is FirebirdPrescriptionReader firebirdReader)
-                {
-                    firebirdReader.LoadIngredients(firebirdResults);
-                }
-
-                return firebirdResults;
+                return reader.Search(searchDateFrom, searchDateTo, searchAddress);
             });
 
             var displayNumber = 1;
@@ -489,6 +787,459 @@ public sealed class MainViewModel : INotifyPropertyChanged
         finally
         {
             IsSearching = false;
+        }
+    }
+
+    private async void RefreshFirebirdRange()
+    {
+        if (string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            MessageBox.Show("Ustaw ścieżkę bazy Firebird przed odświeżeniem zakresu.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsSearching = true;
+            var searchDateFrom = SearchDateFrom;
+            var searchDateTo = SearchDateTo;
+            var searchAddress = SearchAddress;
+
+            var addedCount = await Task.Run(() =>
+            {
+                var existingIds = _localDatabase.GetImportedSourcePrescriptionIds();
+                var reader = new FirebirdPrescriptionReader(Settings);
+                var firebirdResults = reader.Search(searchDateFrom, searchDateTo, searchAddress);
+                var newForms = firebirdResults
+                    .Where(form => !existingIds.Contains(form.SourcePrescriptionId))
+                    .ToList();
+
+                if (newForms.Count == 0)
+                {
+                    return 0;
+                }
+
+                reader.LoadIngredients(newForms);
+                foreach (var form in newForms)
+                {
+                    _localDatabase.UpsertImportedForm(form);
+                }
+
+                return newForms.Count;
+            });
+
+            var refreshedResults = _localDatabase.SearchImportedForms(searchDateFrom, searchDateTo, searchAddress);
+            FoundPrescriptions.Clear();
+            var displayNumber = 1;
+            foreach (var form in refreshedResults)
+            {
+                form.DisplayNumber = displayNumber++;
+                FoundPrescriptions.Add(form);
+            }
+
+            ImportFoundPrescriptions();
+
+            MessageBox.Show(
+                addedCount == 0
+                    ? "Sprawdzono Firebird. Nie znaleziono nowych recept w tym zakresie."
+                    : $"Sprawdzono Firebird. Dodano nowe recepty: {addedCount}.",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udało się odświeżyć zakresu z Firebirda.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    private async void GenerateSettlementReport()
+    {
+        if (string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            MessageBox.Show("Ustaw sciezke bazy Firebird przed wygenerowaniem rozliczen.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsSearching = true;
+            var dateFrom = SettlementDateFrom;
+            var dateTo = SettlementDateTo;
+            var address = SettlementAddress;
+            var rows = await Task.Run(() => new FirebirdPrescriptionReader(Settings).LoadSettlementReport(dateFrom, dateTo, address));
+
+            SettlementRows.Clear();
+            var displayNumber = 1;
+            foreach (var row in rows)
+            {
+                row.DisplayNumber = displayNumber++;
+                SettlementRows.Add(row);
+            }
+
+            OnPropertyChanged(nameof(SettlementLimitTotal));
+            OnPropertyChanged(nameof(SettlementOverLimitTotal));
+            OnPropertyChanged(nameof(SettlementPaymentTotal));
+            (GenerateSettlementReportPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (GenerateAllSettlementInvoicesCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            SelectedSettlementRow = SettlementRows.FirstOrDefault(row => !row.MissingInvoiceNumber);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie wygenerowac raportu rozliczen.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    private void GenerateSelectedSettlementInvoice()
+    {
+        var selectedInvoiceGroups = GetCheckedInvoiceGroups().ToList();
+        if (selectedInvoiceGroups.Count > 1)
+        {
+            MessageBox.Show("Zaznaczono kilka faktur. Użyj przycisku Faktury PDF.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var invoiceRows = selectedInvoiceGroups.Count == 1
+            ? selectedInvoiceGroups[0]
+            : SelectedSettlementRow is null || SelectedSettlementRow.MissingInvoiceNumber
+                ? new List<SettlementReportRow>()
+                : GetInvoiceRows(SelectedSettlementRow).ToList();
+
+        if (invoiceRows.Count == 0)
+        {
+            MessageBox.Show("Zaznacz fakturę checkboxem albo kliknij wiersz z numerem faktury.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            invoiceRows = ReloadSettlementInvoiceRows(invoiceRows[0]);
+            if (invoiceRows.Count == 0)
+            {
+                MessageBox.Show("Nie udało się odświeżyć danych faktury z Firebird.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var filePath = CreateSettlementInvoicePath(invoiceRows[0]);
+            _settlementInvoicePdfGenerator.Generate(invoiceRows, Settings.Pharmacy, filePath);
+            MessageBox.Show($"Wygenerowano fakturę PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+    }
+
+    private void GenerateAllSettlementInvoices()
+    {
+        try
+        {
+            var groups = GetCheckedInvoiceGroups().ToList();
+            if (groups.Count == 0)
+            {
+                groups = SettlementRows
+                    .Where(row => !row.MissingInvoiceNumber)
+                    .GroupBy(GetInvoiceGroupKey)
+                    .Select(group => group.ToList())
+                    .ToList();
+            }
+
+            if (groups.Count == 0)
+            {
+                MessageBox.Show("Brak pozycji z numerem faktury.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var invoiceGroups = new List<IReadOnlyList<SettlementReportRow>>();
+            foreach (var invoiceRows in groups)
+            {
+                var freshInvoiceRows = ReloadSettlementInvoiceRows(invoiceRows[0]);
+                if (freshInvoiceRows.Count == 0)
+                {
+                    freshInvoiceRows = invoiceRows;
+                }
+
+                invoiceGroups.Add(freshInvoiceRows);
+            }
+
+            var filePath = CreateSettlementInvoicesPath();
+            _settlementInvoicePdfGenerator.GenerateMany(invoiceGroups, Settings.Pharmacy, filePath);
+
+            MessageBox.Show($"Wygenerowano jeden plik PDF z fakturami: {invoiceGroups.Count}\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+    }
+
+    private void GenerateSettlementReportPdf()
+    {
+        try
+        {
+            var rows = SettlementRows.ToList();
+            if (rows.Count == 0)
+            {
+                MessageBox.Show("Brak danych rozliczeniowych do wygenerowania PDF.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var filePath = Path.Combine(Settings.OutputDirectory, $"rozliczenia_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+            _settlementReportPdfGenerator.Generate(rows, Settings.Pharmacy, SettlementDateFrom, SettlementDateTo, filePath);
+            MessageBox.Show($"Wygenerowano PDF rozliczeń:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+    }
+
+    private IEnumerable<SettlementReportRow> GetInvoiceRows(SettlementReportRow selectedRow)
+    {
+        var key = GetInvoiceGroupKey(selectedRow);
+        return SettlementRows.Where(row => !row.MissingInvoiceNumber && GetInvoiceGroupKey(row) == key);
+    }
+
+    private List<SettlementReportRow> ReloadSettlementInvoiceRows(SettlementReportRow invoiceRow)
+    {
+        var dateFrom = SettlementDateFrom ?? invoiceRow.SaleDate;
+        var dateTo = SettlementDateTo ?? invoiceRow.SaleDate;
+        var freshRows = new FirebirdPrescriptionReader(Settings).LoadSettlementReport(dateFrom, dateTo, "");
+        var key = GetInvoiceGroupKey(invoiceRow);
+        var rows = freshRows
+            .Where(row => !row.MissingInvoiceNumber && GetInvoiceGroupKey(row) == key)
+            .ToList();
+
+        if (rows.Count == 0 && !string.IsNullOrWhiteSpace(invoiceRow.InvoiceNumber))
+        {
+            rows = freshRows
+                .Where(row => string.Equals(row.InvoiceNumber, invoiceRow.InvoiceNumber, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        return rows;
+    }
+
+    private IEnumerable<List<SettlementReportRow>> GetCheckedInvoiceGroups()
+    {
+        var checkedKeys = SettlementRows
+            .Where(row => row.IsInvoiceSelected && !row.MissingInvoiceNumber)
+            .Select(GetInvoiceGroupKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return SettlementRows
+            .Where(row => !row.MissingInvoiceNumber && checkedKeys.Contains(GetInvoiceGroupKey(row)))
+            .GroupBy(GetInvoiceGroupKey)
+            .Select(group => group.ToList());
+    }
+
+    private static string GetInvoiceGroupKey(SettlementReportRow row)
+    {
+        return string.IsNullOrWhiteSpace(row.InvoiceDocumentId)
+            ? row.InvoiceNumber.Trim()
+            : row.InvoiceDocumentId.Trim();
+    }
+
+    private string CreateSettlementInvoicePath(SettlementReportRow row)
+    {
+        var invoiceNumber = CreateSafeFileNamePart(row.InvoiceNumber);
+        var date = row.InvoiceIssueDate == default ? DateTime.Today : row.InvoiceIssueDate;
+        return Path.Combine(Settings.OutputDirectory, $"faktura_{invoiceNumber}_{date:yyyyMMdd}.pdf");
+    }
+
+    private string CreateSettlementInvoicesPath()
+    {
+        var dateFrom = SettlementDateFrom ?? SettlementRows.Where(row => !row.MissingInvoiceNumber).Select(row => row.SaleDate).DefaultIfEmpty(DateTime.Today).Min();
+        var dateTo = SettlementDateTo ?? SettlementRows.Where(row => !row.MissingInvoiceNumber).Select(row => row.SaleDate).DefaultIfEmpty(DateTime.Today).Max();
+        return Path.Combine(Settings.OutputDirectory, $"faktury_{dateFrom:yyyyMMdd}_{dateTo:yyyyMMdd}_{DateTime.Now:HHmmss}.pdf");
+    }
+
+    private async void GenerateAnalysis()
+    {
+        if (string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            MessageBox.Show("Ustaw sciezke bazy Firebird przed pobraniem analiz.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsSearching = true;
+            var dateFrom = AnalysisDateFrom;
+            var dateTo = AnalysisDateTo;
+            var address = AnalysisAddress;
+            var rows = await Task.Run(() => new FirebirdPrescriptionReader(Settings).LoadAnalysisReport(dateFrom, dateTo, address));
+
+            AnalysisRows.Clear();
+            foreach (var row in rows)
+            {
+                AnalysisRows.Add(row);
+            }
+
+            SelectedAnalysisRow = AnalysisRows.FirstOrDefault();
+            NotifyAnalysisTotalsChanged();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie pobrac analizy recept.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    private void NotifyAnalysisTotalsChanged()
+    {
+        OnPropertyChanged(nameof(AnalysisTotalNet));
+        OnPropertyChanged(nameof(AnalysisTotalGross));
+        OnPropertyChanged(nameof(AnalysisPatientPaymentTotal));
+        OnPropertyChanged(nameof(AnalysisIngredientsNetTotal));
+        OnPropertyChanged(nameof(AnalysisIngredientsGrossTotal));
+        OnPropertyChanged(nameof(AnalysisTaxAndMarginNetTotal));
+        OnPropertyChanged(nameof(AnalysisTaxAndMarginGrossTotal));
+        OnPropertyChanged(nameof(AnalysisPurchaseVatTotal));
+        OnPropertyChanged(nameof(AnalysisSalesVatTotal));
+        OnPropertyChanged(nameof(AnalysisVatDifferenceTotal));
+        OnPropertyChanged(nameof(AnalysisNetProfitTotal));
+        OnPropertyChanged(nameof(AnalysisProfitMinusVatTotal));
+        OnPropertyChanged(nameof(AnalysisVatDifferenceBrush));
+        OnPropertyChanged(nameof(AnalysisProfitMinusVatBrush));
+    }
+
+    private async void LoadInventory()
+    {
+        if (string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            MessageBox.Show("Ustaw sciezke bazy Firebird przed pobraniem magazynu.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsSearching = true;
+            var searchText = InventorySearchText;
+            var onlyNonZero = InventoryOnlyNonZero;
+            var rows = await Task.Run(() => new FirebirdPrescriptionReader(Settings).LoadInventoryItems(searchText));
+
+            InventoryItems.Clear();
+            InventoryDeliveries.Clear();
+            foreach (var row in rows.Where(row => !onlyNonZero || row.TotalQuantity != 0))
+            {
+                InventoryItems.Add(row);
+            }
+
+            SelectedInventoryItem = InventoryItems.FirstOrDefault();
+            (GenerateInventoryPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie pobrac danych magazynu z Firebird.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    private async void GenerateInventoryPdf()
+    {
+        var items = InventoryItems.ToList();
+        if (items.Count == 0)
+        {
+            MessageBox.Show("Brak pozycji magazynu do wygenerowania PDF.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            MessageBox.Show("Ustaw sciezke bazy Firebird przed wygenerowaniem PDF magazynu.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsSearching = true;
+            var reportItems = await Task.Run(() =>
+            {
+                var reader = new FirebirdPrescriptionReader(Settings);
+                return items
+                    .Select(item => new InventoryReportItem
+                    {
+                        Item = item,
+                        Deliveries = reader.LoadInventoryDeliveries(item.FirebirdId)
+                    })
+                    .ToList();
+            });
+
+            Directory.CreateDirectory(Settings.OutputDirectory);
+            var filePath = Path.Combine(Settings.OutputDirectory, $"magazyn_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+            _inventoryPdfGenerator.Generate(reportItems, Settings.Pharmacy, filePath);
+            MessageBox.Show($"Wygenerowano PDF magazynu:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            ShowPdfError(exception);
+        }
+        finally
+        {
+            IsSearching = false;
+        }
+    }
+
+    private async void LoadSelectedInventoryDeliveries()
+    {
+        InventoryDeliveries.Clear();
+        if (SelectedInventoryItem is null || string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var itemId = SelectedInventoryItem.FirebirdId;
+            var rows = await Task.Run(() => new FirebirdPrescriptionReader(Settings).LoadInventoryDeliveries(itemId));
+            InventoryDeliveries.Clear();
+            foreach (var row in rows)
+            {
+                InventoryDeliveries.Add(row);
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                $"Nie udalo sie pobrac dostaw dla wybranej pozycji.\n\n{exception.Message}",
+                "PharmaExt",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -672,56 +1423,78 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         try
         {
-            if (File.Exists(dialog.FileName))
-            {
-                File.Delete(dialog.FileName);
-            }
-
-            using var archive = ZipFile.Open(dialog.FileName, ZipArchiveMode.Create);
-            var databasePath = LocalDatabaseService.GetDefaultDatabasePath();
-            if (File.Exists(databasePath))
-            {
-                var exportDatabasePath = Path.Combine(Path.GetTempPath(), $"pharmaext_export_{Guid.NewGuid():N}.sqlite");
-                try
-                {
-                    _localDatabase.CreateDatabaseBackup(exportDatabasePath);
-                    LocalDatabaseService.ClearConnectionPools();
-                    AddFileToArchiveWithRetry(archive, exportDatabasePath, "pharmaext.sqlite");
-                }
-                finally
-                {
-                    if (File.Exists(exportDatabasePath))
-                    {
-                        DeleteFileWithRetry(exportDatabasePath);
-                    }
-                }
-            }
-
-            var documentsDirectory = GetQualityDocumentsDirectory();
-            if (Directory.Exists(documentsDirectory))
-            {
-                foreach (var file in Directory.GetFiles(documentsDirectory, "*", SearchOption.AllDirectories))
-                {
-                    var relativePath = Path.GetRelativePath(documentsDirectory, file).Replace('\\', '/');
-                    AddFileToArchiveWithRetry(archive, file, $"QualityDocuments/{relativePath}");
-                }
-            }
-
-            var previewsDirectory = GetQualityDocumentPreviewsDirectory();
-            if (Directory.Exists(previewsDirectory))
-            {
-                foreach (var file in Directory.GetFiles(previewsDirectory, "*", SearchOption.AllDirectories))
-                {
-                    var relativePath = Path.GetRelativePath(previewsDirectory, file).Replace('\\', '/');
-                    AddFileToArchiveWithRetry(archive, file, $"QualityPreviews/{relativePath}");
-                }
-            }
-
+            WriteProgramDataArchive(dialog.FileName);
             MessageBox.Show($"Wyeksportowano dane programu:\n{dialog.FileName}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception exception)
         {
             MessageBox.Show($"Nie udalo sie wyeksportowac danych programu.\n\n{exception.Message}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void CreateProgramBackup()
+    {
+        try
+        {
+            var backupDirectory = Path.Combine(LocalDatabaseService.GetDefaultDataDirectory(), "Backups");
+            Directory.CreateDirectory(backupDirectory);
+            var backupPath = Path.Combine(backupDirectory, $"PharmaExt_backup_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
+            WriteProgramDataArchive(backupPath);
+            MessageBox.Show($"Utworzono kopie zapasowa:\n{backupPath}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show($"Nie udalo sie utworzyc kopii zapasowej.\n\n{exception.Message}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void WriteProgramDataArchive(string archivePath)
+    {
+        if (File.Exists(archivePath))
+        {
+            File.Delete(archivePath);
+        }
+
+        using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+        var databasePath = LocalDatabaseService.GetDefaultDatabasePath();
+        if (File.Exists(databasePath))
+        {
+            var exportDatabasePath = Path.Combine(Path.GetTempPath(), $"pharmaext_export_{Guid.NewGuid():N}.sqlite");
+            try
+            {
+                _localDatabase.CreateDatabaseBackup(exportDatabasePath);
+                LocalDatabaseService.ClearConnectionPools();
+                AddFileToArchiveWithRetry(archive, exportDatabasePath, "pharmaext.sqlite");
+            }
+            finally
+            {
+                if (File.Exists(exportDatabasePath))
+                {
+                    DeleteFileWithRetry(exportDatabasePath);
+                }
+            }
+        }
+
+        AddDirectoryToArchive(archive, GetQualityDocumentsDirectory(), "QualityDocuments");
+        AddDirectoryToArchive(archive, GetQualityDocumentPreviewsDirectory(), "QualityPreviews");
+
+        if (File.Exists(DiagnosticLogService.FirebirdLogPath))
+        {
+            AddFileToArchiveWithRetry(archive, DiagnosticLogService.FirebirdLogPath, "Logs/firebird.log");
+        }
+    }
+
+    private static void AddDirectoryToArchive(ZipArchive archive, string directory, string entryPrefix)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.GetFiles(directory, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(directory, file).Replace('\\', '/');
+            AddFileToArchiveWithRetry(archive, file, $"{entryPrefix}/{relativePath}");
         }
     }
 
@@ -811,6 +1584,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ImportedForms.Clear();
             SelectedImportedForms.Clear();
             SelectedForm = null;
+            RefreshFormsView();
             LoadQualityDocuments();
             RelinkImportedQualityDocuments(rebuildMissingPreviews: true);
             MessageBox.Show("Zaimportowano dane programu.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -935,16 +1709,53 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void ImportFoundPrescriptions()
     {
+        _backgroundCompositionKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         ImportedForms.Clear();
         foreach (var form in FoundPrescriptions)
         {
             form.EnableEditTracking();
+            RegisterFormForUiUpdates(form);
             ImportedForms.Add(form);
         }
 
         AssignCompositionGroupColors();
+        RefreshFormsView();
         SelectedForm = null;
         (GenerateBatchPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        _ = LoadCompositionGroupsInBackground();
+    }
+
+    private async Task LoadCompositionGroupsInBackground()
+    {
+        if (_isLoadingCompositionGroups || string.IsNullOrWhiteSpace(Settings.Firebird.DatabasePath))
+        {
+            return;
+        }
+
+        var formsToLoad = ImportedForms
+            .Where(form => !form.IngredientsLoaded)
+            .ToList();
+
+        if (formsToLoad.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _isLoadingCompositionGroups = true;
+            var compositionKeys = await Task.Run(() => new FirebirdPrescriptionReader(Settings).LoadCompositionKeys(formsToLoad));
+            _backgroundCompositionKeys = compositionKeys;
+            AssignCompositionGroupColors();
+        }
+        catch
+        {
+            // Kolorowanie jest pomocnicze; ewentualny błąd pokaże się przy ręcznym wyborze recepty.
+        }
+        finally
+        {
+            _isLoadingCompositionGroups = false;
+        }
     }
 
     private void LoadSelectedFormIngredients()
@@ -1008,7 +1819,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var groups = ImportedForms
-            .Select(form => new { Form = form, Key = BuildCompositionKey(form) })
+            .Select(form => new { Form = form, Key = BuildCompositionKeyWithBackgroundData(form) })
             .Where(item => !string.IsNullOrWhiteSpace(item.Key))
             .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Count() > 1)
@@ -1039,6 +1850,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return ingredientNames.Count == 0 ? "" : string.Join("|", ingredientNames);
     }
 
+    private string BuildCompositionKeyWithBackgroundData(ImportedForm form)
+    {
+        var key = BuildCompositionKey(form);
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            return key;
+        }
+
+        return !string.IsNullOrWhiteSpace(form.SourcePrescriptionId)
+            && _backgroundCompositionKeys.TryGetValue(form.SourcePrescriptionId, out var backgroundKey)
+            ? backgroundKey
+            : "";
+    }
+
     private static bool IsCompositionUnit(string unit)
     {
         var normalizedUnit = NormalizeCompositionText(unit);
@@ -1060,7 +1885,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (!TryParseDecimal(MaxUsedQuantityDeviationPercentText, out var maxDeviationPercent))
         {
-            MessageBox.Show("Maks. odchyl ilosci uzytej wpisz jako liczbe, np. 0,6.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Maks. odchył ilości użytej wpisz jako liczbę, np. 0,6.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -1071,8 +1896,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             EnsureIngredientsLoaded(form);
             _localDatabase.UpsertImportedForm(form);
+            form.EnableEditTracking();
         }
 
+        RefreshFormsView();
         MessageBox.Show("Zapisano dane lokalnie.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
@@ -1129,6 +1956,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             FoundPrescriptions.Clear();
             ImportedForms.Clear();
             SelectedForm = null;
+            RefreshFormsView();
             (GenerateBatchPdfCommand as RelayCommand)?.RaiseCanExecuteChanged();
 
             MessageBox.Show(
@@ -1235,7 +2063,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 ApplyBatchValue(form, SelectedBatchEditField.Field, BatchEditValue);
             }
 
-            CollectionViewSource.GetDefaultView(ImportedForms).Refresh();
+            RefreshFormsView();
             OnPropertyChanged(nameof(SelectedForm));
 
             MessageBox.Show(
@@ -1258,6 +2086,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private bool CanAcceptRecipeInstruction() => SelectedForm is not null && SelectedRecipeInstruction is not null;
 
+    private bool CanAutoAcceptRecipeInstruction() => RecipeInstructions.Count > 0 && (SelectedForm is not null || SelectedImportedForms.Count > 0);
+
     private void AcceptRecipeInstruction()
     {
         if (SelectedForm is null || SelectedRecipeInstruction is null)
@@ -1265,17 +2095,581 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        var instructionText = $"Zgodnie z instrukcjÄ… numer: {SelectedRecipeInstruction.Code}";
-        SelectedForm.ManualCalculations = instructionText;
-        SelectedForm.ManualPreparationDescription = instructionText;
-        SelectedForm.ManualNotes = SelectedRecipeInstruction.Title;
+        ApplyRecipeInstruction(SelectedForm, SelectedRecipeInstruction);
         OnPropertyChanged(nameof(SelectedForm));
 
         MessageBox.Show(
-            $"Wpisano instrukcje {SelectedRecipeInstruction.Code} do pĂłl Obliczenia i Opis wykonania oraz tytul do pola Uwagi.",
+            $"Wpisano instrukcję {SelectedRecipeInstruction.Code} do pól Obliczenia i Opis wykonania oraz tytuł do pola Uwagi.",
             "PharmaExt",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
+    }
+
+    private void AutoAcceptRecipeInstruction()
+    {
+        var forms = SelectedImportedForms.Count > 0
+            ? SelectedImportedForms.ToList()
+            : SelectedForm is not null ? [SelectedForm] : [];
+
+        if (forms.Count == 0)
+        {
+            return;
+        }
+
+        var instructionCompositions = RecipeInstructions
+            .Select(document => new { Document = document, Names = BuildInstructionIngredientSet(document) })
+            .Where(item => item.Names.Count > 0)
+            .ToList();
+
+        if (instructionCompositions.Count == 0)
+        {
+            MessageBox.Show("Nie udało się odczytać składów z instrukcji IR.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var matched = 0;
+        var notMatched = 0;
+        var errors = 0;
+        foreach (var form in forms)
+        {
+            try
+            {
+                EnsureIngredientsLoaded(form);
+                var formNames = BuildFormInstructionMatchSet(form);
+                var match = formNames.Count == 0
+                    ? null
+                    : instructionCompositions
+                        .Where(item => formNames.All(name => item.Names.Contains(name)))
+                        .OrderBy(item => item.Names.Count)
+                        .ThenBy(item => item.Document.Code)
+                        .FirstOrDefault();
+
+                if (match is not null)
+                {
+                    ApplyRecipeInstruction(form, match.Document);
+                    matched++;
+                }
+                else
+                {
+                    notMatched++;
+                }
+            }
+            catch
+            {
+                errors++;
+            }
+        }
+
+        OnPropertyChanged(nameof(SelectedForm));
+        MessageBox.Show(
+            $"Automatyczne przypisanie instrukcji zakończone.\n\nDopasowano: {matched}\nBez dopasowania: {notMatched}\nBłędy pobierania składników: {errors}",
+            "PharmaExt",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private static void ApplyRecipeInstruction(ImportedForm form, QualityDocument instruction)
+    {
+        var instructionText = $"Zgodnie z instrukcją numer: {instruction.Code}";
+        form.ManualCalculations = instructionText;
+        form.ManualPreparationDescription = instructionText;
+        form.ManualNotes = instruction.Title;
+    }
+
+    private static HashSet<string> BuildFormInstructionMatchSet(ImportedForm form)
+    {
+        return form.Ingredients
+            .Where(ingredient => IsGramUnit(ingredient.Unit))
+            .Select(ingredient => NormalizeInstructionIngredientName(ingredient.Name))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<string> BuildInstructionIngredientSet(QualityDocument instruction)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? previousCandidateName = null;
+        foreach (var rawLine in instruction.ContentText
+            .Replace("\r\n", "\n")
+            .Split('\n'))
+        {
+            var line = StripQualityMarkers(rawLine.Trim());
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var inlineName = ExtractInstructionIngredientName(line);
+            if (!string.IsNullOrWhiteSpace(inlineName))
+            {
+                names.Add(inlineName);
+                previousCandidateName = null;
+                continue;
+            }
+
+            if (IsInstructionQuantityOnlyLine(line) && !string.IsNullOrWhiteSpace(previousCandidateName))
+            {
+                names.Add(previousCandidateName);
+                previousCandidateName = null;
+                continue;
+            }
+
+            previousCandidateName = IsInstructionIngredientNameCandidate(line)
+                ? NormalizeInstructionIngredientName(line)
+                : null;
+        }
+
+        return names;
+    }
+
+    private static string ExtractInstructionIngredientName(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return "";
+        }
+
+        var normalized = Normalize(line).Replace(".", "");
+        if (normalized is "rp" or "mf" || normalized.StartsWith("mf ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        if (!Regex.IsMatch(line, @"\d+([,.]\d+)?", RegexOptions.IgnoreCase))
+        {
+            return "";
+        }
+
+        var quantityMatch = Regex.Match(line, @"\s+\d+([,.]\d+)?\s*(g|mg|ml|op|szt|kropl|%)?\s*$", RegexOptions.IgnoreCase);
+        if (!quantityMatch.Success)
+        {
+            return "";
+        }
+
+        var name = line[..quantityMatch.Index].Trim();
+        name = Regex.Replace(name, @"^\d+[\).\-\s]*", "").Trim();
+        return NormalizeInstructionIngredientName(name);
+    }
+
+    private static bool IsInstructionQuantityOnlyLine(string line)
+    {
+        return Regex.IsMatch(line.Trim(), @"^(ad\s+)?[≈~]?\s*\d+([,.]\d+)?\s*(g|mg|ml|op|szt|kropl|%)?\s*$", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsInstructionIngredientNameCandidate(string line)
+    {
+        if (IsQualityHeading(line) || IsNumberedQualitySectionHeading(line))
+        {
+            return false;
+        }
+
+        var normalized = Normalize(line).Replace(".", "");
+        if (normalized is "rp" or "mf" or "ds"
+            || normalized.Contains("skladnik", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("ilosc", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("rola", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("uwagi", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("postac", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("substancja czynna", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("podloze", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("nosnik", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("dane wejsciowe", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (Regex.IsMatch(line, @"\d+([,.]\d+)?", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedName = NormalizeInstructionIngredientName(line);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return false;
+        }
+
+        return normalizedName.Contains(' ', StringComparison.Ordinal)
+            || normalizedName.EndsWith("um", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.EndsWith("i", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.EndsWith("ae", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.EndsWith("liq", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.EndsWith("gel", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeInstructionIngredientName(string value)
+    {
+        var text = Normalize(value)
+            .Replace("(rec)", "", StringComparison.OrdinalIgnoreCase)
+            .Replace(" rec ", " ", StringComparison.OrdinalIgnoreCase)
+            .Replace("subst", "", StringComparison.OrdinalIgnoreCase);
+
+        text = Regex.Replace(text, @"[^a-z0-9]+", " ");
+        text = Regex.Replace(text, @"\s+", " ").Trim();
+        text = Regex.Replace(text, @"\bvit\b", "vitaminum", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"\bd3\b", "d3", RegexOptions.IgnoreCase);
+
+        text = text switch
+        {
+            "devikap" => "vitaminum d3 liq",
+            "vigantol" => "vitaminum d3 liq",
+            "colecalciferolum" => "vitaminum d3 liq",
+            "vitaminum d3" => "vitaminum d3 liq",
+            "vitaminum d3 liq" => "vitaminum d3 liq",
+            "vitaminum e medana" => "vitaminum e liq",
+            "vitaminum e" => "vitaminum e liq",
+            "vitaminum e liq" => "vitaminum e liq",
+            "levomentholum" => "mentholum",
+            _ => text
+        };
+
+        return text;
+    }
+
+    private static bool IsGramUnit(string unit)
+    {
+        var normalizedUnit = NormalizeCompositionText(unit);
+        return normalizedUnit == "g";
+    }
+
+    private void CopyCheckedFieldsGeneratedUnused()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldValues(ImportedForm source, ImportedForm target)
+    {
+        if (CopyLabelType)
+        {
+            target.LabelType = source.LabelType;
+        }
+
+        if (CopyLabelSize)
+        {
+            target.LabelSize = source.LabelSize;
+        }
+
+        if (CopyLabelMedicineForm)
+        {
+            target.LabelMedicineForm = source.LabelMedicineForm;
+            target.DrugForm = source.LabelMedicineForm;
+        }
+
+        if (CopyMedicineExpiryDate)
+        {
+            target.MedicineExpiryDate = source.MedicineExpiryDate;
+        }
+
+        if (CopyMixBeforeUse)
+        {
+            target.MixBeforeUse = source.MixBeforeUse;
+        }
+
+        if (CopyManualCalculations)
+        {
+            target.ManualCalculations = source.ManualCalculations;
+        }
+
+        if (CopyManualPreparationDescription)
+        {
+            target.ManualPreparationDescription = source.ManualPreparationDescription;
+        }
+
+        if (CopyManualQualityControl)
+        {
+            target.ManualQualityControl = source.ManualQualityControl;
+        }
+
+        if (CopyDosage)
+        {
+            target.Dosage = source.Dosage;
+        }
+
+        if (CopyManualNotes)
+        {
+            target.ManualNotes = source.ManualNotes;
+        }
+    }
+
+    private void ClearCopyCheckboxes()
+    {
+        CopyLabelType = false;
+        CopyLabelSize = false;
+        CopyLabelMedicineForm = false;
+        CopyMedicineExpiryDate = false;
+        CopyMixBeforeUse = false;
+        CopyManualCalculations = false;
+        CopyManualPreparationDescription = false;
+        CopyManualQualityControl = false;
+        CopyDosage = false;
+        CopyManualNotes = false;
+    }
+
+    private void CopyCheckedFieldsOld()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsDuplicateMarker()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsLegacy()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsUnused()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsOriginal()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsBackup()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFieldsTemp()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields2()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields3()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields4()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields5()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields6()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields7()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields8()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields9()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyCheckedFields10()
+    {
+        if (SelectedForm is null || SelectedImportedForms.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var target in SelectedImportedForms)
+        {
+            CopyCheckedFieldValues(SelectedForm, target);
+        }
+
+        ClearCopyCheckboxes();
+        MessageBox.Show("Skopiowano zaznaczone pola do wybranych recept.", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void CopyCheckedFields()
@@ -1303,7 +2697,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         ClearCheckedCopyFields();
-        CollectionViewSource.GetDefaultView(ImportedForms).Refresh();
+        RefreshFormsView();
 
         MessageBox.Show(
             $"Skopiowano zaznaczone pola do recept: {changedCount}. Kliknij Zapisz, zeby utrwalic zmiany.",
@@ -1507,15 +2901,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static string Normalize(string value)
     {
         return value.Trim().ToLowerInvariant()
-            .Replace("Ä…", "a")
-            .Replace("Ä‡", "c")
-            .Replace("Ä™", "e")
-            .Replace("Ĺ‚", "l")
-            .Replace("Ĺ„", "n")
-            .Replace("Ăł", "o")
-            .Replace("Ĺ›", "s")
-            .Replace("ĹĽ", "z")
-            .Replace("Ĺş", "z");
+            .Replace("ą", "a")
+            .Replace("ć", "c")
+            .Replace("ę", "e")
+            .Replace("ł", "l")
+            .Replace("ń", "n")
+            .Replace("ó", "o")
+            .Replace("ś", "s")
+            .Replace("ż", "z")
+            .Replace("ź", "z");
     }
 
     private void GenerateProtocolPdf()
@@ -1531,6 +2925,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var prescriptionNumber = CreateSafeFileNamePart(SelectedForm.PrescriptionNumber);
             var filePath = Path.Combine(Settings.OutputDirectory, $"protokol_{prescriptionNumber}.pdf");
             _protocolPdfGenerator.GenerateProtocolWithA4Label(SelectedForm, Settings.Pharmacy, filePath);
+            SelectedForm.Status = FormStatus.PdfGenerated;
+            _localDatabase.UpsertImportedForm(SelectedForm);
+            SelectedForm.EnableEditTracking();
+            RefreshFormsView();
             MessageBox.Show($"Wygenerowano PDF:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception exception)
@@ -1558,6 +2956,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Directory.CreateDirectory(Settings.OutputDirectory);
             var filePath = Path.Combine(Settings.OutputDirectory, $"protokoly_i_naklejki_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
             _protocolPdfGenerator.GenerateProtocolsWithA4Labels(forms, Settings.Pharmacy, filePath);
+            foreach (var form in forms)
+            {
+                form.Status = FormStatus.PdfGenerated;
+                _localDatabase.UpsertImportedForm(form);
+                form.EnableEditTracking();
+            }
+
+            RefreshFormsView();
             MessageBox.Show($"Wygenerowano PDF zbiorczy:\n{Path.GetFullPath(filePath)}", "PharmaExt", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception exception)
@@ -1620,13 +3026,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         document = new QualityDocument();
         var fileName = Path.GetFileNameWithoutExtension(filePath);
-        var match = Regex.Match(fileName, @"^(?<code>(SOP|IO|IT|FRM|REJ|ZA[ĹL]|IR)-\d+)\s*(?<title>.*)$", RegexOptions.IgnoreCase);
+        var match = Regex.Match(fileName, @"^(?<code>(SOP|IO|IT|FRM|REJ|ZA[ŁL]|IR)-\d+)\s*(?<title>.*)$", RegexOptions.IgnoreCase);
         if (!match.Success)
         {
             return false;
         }
 
-        var code = match.Groups["code"].Value.ToUpperInvariant().Replace("ZAĹ", "ZAL");
+        var code = match.Groups["code"].Value.ToUpperInvariant().Replace("ZAŁ", "ZAL");
         var title = match.Groups["title"].Value.Trim(' ', '-', '_');
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -1878,7 +3284,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (title.Equals(code, StringComparison.OrdinalIgnoreCase)
             || NormalizeCodeLikeText(title).Equals(NormalizeCodeLikeText(code), StringComparison.OrdinalIgnoreCase)
             || title.Equals("Spis tresci", StringComparison.OrdinalIgnoreCase)
-            || title.Equals("Spis treĹ›ci", StringComparison.OrdinalIgnoreCase)
+            || title.Equals("Spis treści", StringComparison.OrdinalIgnoreCase)
             || IsGenericQualityDocumentTitle(title)
             || title.StartsWith("Wersja", StringComparison.OrdinalIgnoreCase)
             || title.StartsWith("Status", StringComparison.OrdinalIgnoreCase))
@@ -1907,7 +3313,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static string NormalizeQualityDocumentText(string value)
     {
         var text = Regex.Replace(value.Trim(), @"\s+", " ");
-        text = Regex.Replace(text, @"^(?<code>(SOP|IO|IT|FRM|REJ|ZA[ĹL]|IR)-\d+)(?<title>\S)", "${code} ${title}", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"^(?<code>(SOP|IO|IT|FRM|REJ|ZA[ŁL]|IR)-\d+)(?<title>\S)", "${code} ${title}", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"(?<!\s)(Wersja\s*:)", " $1", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"(?<!\s)(Status\s*:)", " $1", RegexOptions.IgnoreCase);
         return text;
@@ -1916,7 +3322,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static bool IsQualityHeading(string text)
     {
         return Regex.IsMatch(text, @"^\d+\.\s+\S")
-            || Regex.IsMatch(text, @"^[A-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»0-9\s\-]{12,}$");
+            || Regex.IsMatch(text, @"^[A-ZĄĆĘŁŃÓŚŹŻ0-9\s\-]{12,}$");
     }
 
     private static IReadOnlyList<QualityContentLine> ParseQualityContentLines(string content)

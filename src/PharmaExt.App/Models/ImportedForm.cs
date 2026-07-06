@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 namespace PharmaExt.App.Models;
 
@@ -18,6 +19,7 @@ public sealed class ImportedForm : INotifyPropertyChanged
     private string _manualFinalAssessment = "";
     private string _manualNotes = "";
     private bool _mixBeforeUse;
+    private FormStatus _status = FormStatus.Imported;
     private bool _isEditedThisSession;
     private string _compositionGroupBrush = "Transparent";
     private int _compositionGroupNumber;
@@ -41,7 +43,6 @@ public sealed class ImportedForm : INotifyPropertyChanged
     public DateTime PreparationDate { get; set; } = DateTime.Today;
     public DateTime? SaleDate { get; set; }
     public string StorageConditions { get; set; } = "";
-    public FormStatus Status { get; set; } = FormStatus.Imported;
     public bool IngredientsLoaded { get; set; }
     public ObservableCollection<ImportedFormIngredient> Ingredients { get; set; } = new();
 
@@ -101,13 +102,21 @@ public sealed class ImportedForm : INotifyPropertyChanged
     public string ManualCalculations
     {
         get => _manualCalculations;
-        set => SetEditableProperty(ref _manualCalculations, value);
+        set
+        {
+            SetEditableProperty(ref _manualCalculations, value);
+            OnPropertyChanged(nameof(HasInstruction));
+        }
     }
 
     public string ManualPreparationDescription
     {
         get => _manualPreparationDescription;
-        set => SetEditableProperty(ref _manualPreparationDescription, value);
+        set
+        {
+            SetEditableProperty(ref _manualPreparationDescription, value);
+            OnPropertyChanged(nameof(HasInstruction));
+        }
     }
 
     public string ManualQualityControl
@@ -133,6 +142,29 @@ public sealed class ImportedForm : INotifyPropertyChanged
         get => _mixBeforeUse;
         set => SetEditableProperty(ref _mixBeforeUse, value);
     }
+
+    public FormStatus Status
+    {
+        get => _status;
+        set
+        {
+            if (_status == value)
+            {
+                return;
+            }
+
+            _status = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasGeneratedPdf));
+            MarkEdited();
+        }
+    }
+
+    public bool HasInstruction =>
+        ContainsInstructionCode(ManualCalculations)
+        || ContainsInstructionCode(ManualPreparationDescription);
+
+    public bool HasGeneratedPdf => Status == FormStatus.PdfGenerated;
 
     public bool IsEditedThisSession
     {
@@ -222,6 +254,11 @@ public sealed class ImportedForm : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static bool ContainsInstructionCode(string value)
+    {
+        return Regex.IsMatch(value, @"\bIR\s*-\s*\d{1,4}\b", RegexOptions.IgnoreCase);
     }
 
     private static bool TryParseDate(string value, out DateTime date)

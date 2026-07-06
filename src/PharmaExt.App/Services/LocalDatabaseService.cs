@@ -343,6 +343,22 @@ public sealed class LocalDatabaseService
         transaction.Commit();
     }
 
+    public HashSet<string> GetImportedSourcePrescriptionIds()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT SourcePrescriptionId FROM ImportedForms;";
+
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            ids.Add(ReadString(reader, "SourcePrescriptionId", ""));
+        }
+
+        return ids;
+    }
+
     public void ResetLocalData()
     {
         using var connection = OpenConnection();
@@ -369,8 +385,8 @@ public sealed class LocalDatabaseService
             WHERE ImportedFormId IN (
                 SELECT Id
                 FROM ImportedForms
-                WHERE PreparationDate >= $dateFrom
-                  AND PreparationDate < $dateTo
+                WHERE COALESCE(SaleDate, PreparationDate) >= $dateFrom
+                  AND COALESCE(SaleDate, PreparationDate) < $dateTo
             );
             """,
             ("$dateFrom", dateFromValue),
@@ -381,8 +397,8 @@ public sealed class LocalDatabaseService
             WHERE ImportedFormId IN (
                 SELECT Id
                 FROM ImportedForms
-                WHERE PreparationDate >= $dateFrom
-                  AND PreparationDate < $dateTo
+                WHERE COALESCE(SaleDate, PreparationDate) >= $dateFrom
+                  AND COALESCE(SaleDate, PreparationDate) < $dateTo
             );
             """,
             ("$dateFrom", dateFromValue),
@@ -390,8 +406,8 @@ public sealed class LocalDatabaseService
 
         Execute(connection, transaction, """
             DELETE FROM ImportedForms
-            WHERE PreparationDate >= $dateFrom
-              AND PreparationDate < $dateTo;
+            WHERE COALESCE(SaleDate, PreparationDate) >= $dateFrom
+              AND COALESCE(SaleDate, PreparationDate) < $dateTo;
             """,
             ("$dateFrom", dateFromValue),
             ("$dateTo", dateToValue));
@@ -433,15 +449,15 @@ public sealed class LocalDatabaseService
                 MixBeforeUse,
                 Status
             FROM ImportedForms
-            WHERE PreparationDate >= $dateFrom
-              AND PreparationDate < $dateTo
+            WHERE COALESCE(SaleDate, PreparationDate) >= $dateFrom
+              AND COALESCE(SaleDate, PreparationDate) < $dateTo
               AND (
                   $searchText = ''
                   OR PatientName LIKE $searchPattern
                   OR PatientAddress LIKE $searchPattern
                   OR PrescriptionNumber LIKE $searchPattern
               )
-            ORDER BY PreparationDate DESC, PrescriptionNumber;
+            ORDER BY COALESCE(SaleDate, PreparationDate) DESC, PrescriptionNumber;
             """;
 
         var dateFromValue = (dateFrom?.Date ?? DateTime.Today.AddDays(-7)).ToString("O");
@@ -483,11 +499,11 @@ public sealed class LocalDatabaseService
                 ManualFinalAssessment = ReadString(reader, "ManualFinalAssessment", ""),
                 ManualNotes = ReadString(reader, "ManualNotes", ""),
                 MixBeforeUse = ReadBoolean(reader, "MixBeforeUse"),
-                Status = ReadEnum(reader, "Status", FormStatus.Imported),
-                IngredientsLoaded = true
+                Status = ReadEnum(reader, "Status", FormStatus.Imported)
             };
 
             LoadIngredients(connection, form);
+            form.IngredientsLoaded = form.Ingredients.Count > 0;
             forms.Add(form);
         }
 
@@ -765,8 +781,8 @@ public sealed class LocalDatabaseService
         command.CommandText = """
             SELECT COUNT(*)
             FROM ImportedForms
-            WHERE PreparationDate >= $dateFrom
-              AND PreparationDate < $dateTo;
+            WHERE COALESCE(SaleDate, PreparationDate) >= $dateFrom
+              AND COALESCE(SaleDate, PreparationDate) < $dateTo;
             """;
         command.Parameters.AddWithValue("$dateFrom", dateFrom);
         command.Parameters.AddWithValue("$dateTo", dateTo);
